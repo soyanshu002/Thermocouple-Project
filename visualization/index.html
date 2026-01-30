@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blast Furnace Thermocouple Visualization</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #000;
+            color: white;
+            font-family: sans-serif;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            width: 100%;
+            text-align: center;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        #tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 5px;
+            border-radius: 4px;
+            pointer-events: none;
+            display: none;
+            z-index: 100;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(30, 30, 30, 0.8);
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid #555;
+            z-index: 100;
+        }
+
+        #dateLabel {
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-bottom: 5px;
+            display: block;
+        }
+
+        input[type=range] {
+            width: 400px;
+            cursor: pointer;
+        }
+
+        #toggleBtn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            background: #444;
+            color: #fff;
+            border: 1px solid #777;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        #toggleBtn:hover {
+            background: #666;
+        }
+
+        #toggleBtn.active {
+            background: #00aa00;
+            border-color: #00ff00;
+        }
+    </style>
+    <!-- Import maps polyfill -->
+    <script async src="https://unpkg.com/es-module-shims@1.8.0/dist/es-module-shims.js"></script>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+
+<body>
+    <div id="info">
+        <h1>Blast Furnace Thermocouple Visualization</h1>
+        <p>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</p>
+    </div>
+    <div id="tooltip"></div>
+    <div id="controls">
+        <span id="dateLabel">Loading Data...</span>
+        <input type="range" id="dateSlider" disabled>
+        <button id="toggleBtn">Switch to Heatmap View</button>
+    </div>
+    <script type="module" src="./script.js"></script>
+</body>
+
+</html>
