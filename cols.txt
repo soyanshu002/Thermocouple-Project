@@ -1,0 +1,3 @@
+['Sl No.', 'MEASUREDATE', 'VALUE']
+Sample Data:
+[1, '29-03-2016', 43]
