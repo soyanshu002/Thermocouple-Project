@@ -1,0 +1,8 @@
+\n--- Prediction Summary ---
+ANALYSIS LAYER (Z=5777)
+\nNOMINAL (Average Temp) PREDICTIONS:
+  Linear Regression: Safe/Not Predicted
+  ARIMA (TimeSeries): Safe/Not Predicted
+\nSAFETY (Max Temp) PREDICTIONS:
+  Linear Regression: 2019-10-09
+  ARIMA (TimeSeries): 2019-10-09

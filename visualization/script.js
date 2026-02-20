@@ -411,6 +411,58 @@ function updateHeatmap(date) {
         if (meshInner) meshInner.visible = true;
         if (wireframe) wireframe.visible = true;
     }
+
+    // 3. Update High Temp Table
+    const listBody = document.getElementById('highTempList');
+    const countDiv = document.getElementById('highTempCount');
+
+    if (listBody && countDiv) {
+        listBody.innerHTML = '';
+        let highTempTCs = [];
+
+        // We can't iterate thermocoupleMeshes directly efficiently if we want temp, 
+        // but we have dailyTemps map.
+        // Actually thermocoupleMeshes keys are normalized IDs. dailyTemps keys are also normalized IDs.
+
+        for (let id in dailyTemps) {
+            const temp = dailyTemps[id];
+            if (temp > 1150) {
+                // Find mesh to get metadata
+                const mesh = thermocoupleMeshes[id];
+                if (mesh) {
+                    highTempTCs.push({
+                        id: mesh.userData.id, // Original ID
+                        pos: mesh.userData.position,
+                        temp: temp
+                    });
+                }
+            }
+        }
+
+        // Sort by temp descending
+        highTempTCs.sort((a, b) => b.temp - a.temp);
+
+        countDiv.textContent = `Count: ${highTempTCs.length}`;
+
+        if (highTempTCs.length === 0) {
+            const row = document.createElement('tr');
+            row.innerHTML = '<td colspan="3" style="text-align:center; padding: 10px; color: #888;">No TCs > 1150°C</td>';
+            listBody.appendChild(row);
+        } else {
+            highTempTCs.forEach(tc => {
+                const row = document.createElement('tr');
+                row.style.borderBottom = '1px solid #444';
+                row.innerHTML = `
+                    <td style="padding: 4px;">${tc.id}</td>
+                    <td style="padding: 4px;">${tc.pos}</td>
+                    <td style="text-align: right; padding: 4px; color: #ff5555; font-weight: bold;">
+                        ${Math.round(tc.temp)}°C
+                    </td>
+                `;
+                listBody.appendChild(row);
+            });
+        }
+    }
 }
 
 function precomputeIDW() {

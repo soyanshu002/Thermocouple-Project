@@ -103,6 +103,37 @@
         <input type="range" id="dateSlider" disabled>
         <button id="toggleBtn">Switch to Heatmap View</button>
     </div>
+
+    <!-- Panel for High Temp TCs -->
+    <div id="highTempPanel" style="
+        position: absolute;
+        top: 10px;
+        right: 10px;
+        width: 300px;
+        max-height: 80vh;
+        overflow-y: auto;
+        background: rgba(30, 30, 30, 0.9);
+        border: 1px solid #555;
+        border-radius: 8px;
+        padding: 10px;
+        font-size: 14px;
+        z-index: 100;
+    ">
+        <h3 style="margin-top: 0; color: #ff4444;">High Temp TCs (>1150°C)</h3>
+        <div id="highTempCount" style="margin-bottom: 5px; font-weight: bold;">Count: 0</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+            <thead>
+                <tr style="border-bottom: 1px solid #777;">
+                    <th style="text-align: left; padding: 4px;">ID</th>
+                    <th style="text-align: left; padding: 4px;">Pos</th>
+                    <th style="text-align: right; padding: 4px;">Temp</th>
+                </tr>
+            </thead>
+            <tbody id="highTempList">
+                <!-- Rows will be added here -->
+            </tbody>
+        </table>
+    </div>
     <script type="module" src="./script.js"></script>
 </body>
 
