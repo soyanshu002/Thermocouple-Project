@@ -10,9 +10,13 @@ let thermocoupleMeshes = {}; // Map ID -> Mesh (Head)
 let thermocouplePositions = []; // Array of { id, pos: Vector3 }
 let isHeatmapMode = true;
 let meshOuter, meshInner, wireframe, materialRealistic, materialHeatmap;
+let globalProfileData = null;
+let isCroppedMode = true;
+let isIsolatedMode = false;
 
-let idwWeights = []; // Pre-computed weights [vertexIndex][tcIndex]
-let idwIndices = []; // Pre-computed TC indices [vertexIndex][tcIndex]
+let idwWeightsOuter = []; // Pre-computed weights [vertexIndex][tcIndex]
+let bottomPlanes = [];
+let bottomPlaneWeights = [];
 // Storing flat arrays for performance? Or array of objects? 
 // For 6000 vertices, array of arrays is fine.
 
@@ -39,6 +43,8 @@ function init() {
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.localClippingEnabled = true; // Required for object-level clipping if used, global planes work automatically
+
     // Tone mapping for realistic lighting
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.0;
@@ -51,7 +57,7 @@ function init() {
     controls.screenSpacePanning = false;
     controls.minDistance = 100;
     controls.maxDistance = 50000;
-    controls.target.set(0, 7000, 0); // Aim at middle of furnace
+    controls.target.set(0, 3000, 0); // Aim at middle-lower part of furnace
 
     // Lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.3); // Soft white light
@@ -77,9 +83,24 @@ function init() {
 
     // Grid Helper (Floor)
     const gridHelper = new THREE.GridHelper(30000, 30, 0x444444, 0x222222);
-    // Move grid down a bit? No, keep at 0. But furnace starts at Z~3946, so let's move grid to 0
-    // Actually our data Z correlates to height. So 0 is ground.
     scene.add(gridHelper);
+
+    // Axis Coordinate Labels
+    const axesMarkers = new THREE.Group();
+    for (let i = -15000; i <= 15000; i += 5000) {
+        if (i === 0) continue; // Skip origin to avoid clutter
+
+        // X-axis labels (data X maps to ThreeJS X)
+        axesMarkers.add(createTextSprite(i.toString(), new THREE.Vector3(i, 50, 0), "#ffaaaa"));
+
+        // Y-axis labels (data Y maps to ThreeJS Z)
+        axesMarkers.add(createTextSprite(i.toString(), new THREE.Vector3(0, 50, i), "#aaffaa"));
+    }
+
+    // Main Axis Names
+    axesMarkers.add(createTextSprite("X Axis", new THREE.Vector3(16000, 50, 0), "#ff4444", 60));
+    axesMarkers.add(createTextSprite("Y Axis", new THREE.Vector3(0, 50, 16000), "#44ff44", 60));
+    scene.add(axesMarkers);
 
     // Raycaster for interaction
     raycaster = new THREE.Raycaster();
@@ -91,6 +112,29 @@ function init() {
     // Event listeners
     window.addEventListener('resize', onWindowResize);
     document.addEventListener('mousemove', onPointerMove);
+
+    // Initial Slice Mode Setup
+    const sliceModeSelect = document.getElementById('sliceMode');
+    if (sliceModeSelect) {
+        sliceModeSelect.addEventListener('change', () => {
+            const mode = sliceModeSelect.value;
+            if (mode === 'none') {
+                renderer.clippingPlanes = [];
+            } else if (mode === 'x') {
+                // Slice along X-axis (shows YZ plane)
+                renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0)];
+                const targetY = isCroppedMode ? 3000 : 7000;
+                controls.target.set(0, targetY, 0);
+                camera.position.set(20000, targetY, 0);
+            } else if (mode === 'y') {
+                // Slice along Y-axis (shows XZ plane) -> In Three.js this is cutting across Z axis
+                renderer.clippingPlanes = [new THREE.Plane(new THREE.Vector3(0, 0, -1), 0)];
+                const targetY = isCroppedMode ? 3000 : 7000;
+                controls.target.set(0, targetY, 0);
+                camera.position.set(0, targetY, 20000);
+            }
+        });
+    }
 }
 
 async function loadData() {
@@ -101,7 +145,7 @@ async function loadData() {
             fetch('./temperatures.json')
         ]);
 
-        const profileData = await profileResponse.json();
+        globalProfileData = await profileResponse.json();
         temperatureData = await tempResponse.json();
 
         // Process dates
@@ -115,7 +159,7 @@ async function loadData() {
         initSlider();
         const csvText = await csvResponse.text();
 
-        createFurnaceMesh(profileData);
+        createFurnaceMesh(globalProfileData);
         processCSV(csvText);
 
         // Pre-compute weights for IDW optimization
@@ -140,6 +184,7 @@ function createFurnaceMesh(profilePoints) {
     const thickness = 500; // Gap between inner and outer wall
 
     for (let point of profilePoints) {
+        if (isCroppedMode && point.z > 6637) continue; // Cut off outer shell entirely above 6637
         pointsOuter.push(new THREE.Vector2(point.r, point.z));
         // Ensure inner radius doesn't go negative
         pointsInner.push(new THREE.Vector2(Math.max(0, point.r - thickness), point.z));
@@ -206,6 +251,45 @@ function createFurnaceMesh(profilePoints) {
     );
     wireframe.visible = !isHeatmapMode; // Hide in heatmap mode
     scene.add(wireframe);
+
+    // 3. Bottom Layer Gradient Planes
+    const targetLayers = [4727, 5177, 6177];
+    for (let z of targetLayers) {
+        if (isCroppedMode && z > 6637) continue;
+
+        let r = 5000;
+        for (let i = 0; i < profilePoints.length - 1; i++) {
+            const p1 = profilePoints[i];
+            const p2 = profilePoints[i + 1];
+            if (p1.z <= z && p2.z >= z) {
+                const t = (z - p1.z) / (p2.z - p1.z);
+                r = p1.r + t * (p2.r - p1.r);
+                break;
+            } else if (p1.z === z) {
+                r = p1.r;
+                break;
+            }
+        }
+
+        // Ensure radius is valid, subtract thickness to fit inside outer wall roughly
+        r = Math.max(1, r - (thickness / 2));
+
+        // Use more segments for a smoother heatmap
+        const geo = new THREE.CircleGeometry(r, 64);
+        geo.rotateX(-Math.PI / 2); // Lay flat
+        geo.translate(0, z, 0);
+
+        const count = geo.attributes.position.count;
+        geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(count * 3), 3));
+        const colors = geo.attributes.color;
+        for (let i = 0; i < count; i++) colors.setXYZ(i, 0.6, 0.8, 1.0);
+
+        const mat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.visible = isHeatmapMode;
+        scene.add(mesh);
+        bottomPlanes.push(mesh);
+    }
 }
 
 
@@ -351,6 +435,61 @@ function initSlider() {
         updateHeatmap(date);
     });
 
+    // Height Toggle Button
+    const heightBtn = document.getElementById('heightToggleBtn');
+    if (heightBtn) {
+        heightBtn.textContent = isCroppedMode ? "Switch to Full Height" : "Switch to Cropped Height";
+        heightBtn.addEventListener('click', () => {
+            isCroppedMode = !isCroppedMode;
+            heightBtn.textContent = isCroppedMode ? "Switch to Full Height" : "Switch to Cropped Height";
+
+            // Rebuild furnace mesh
+            if (meshOuter) { scene.remove(meshOuter); meshOuter.geometry.dispose(); }
+            if (meshInner) { scene.remove(meshInner); meshInner.geometry.dispose(); meshInner.material.dispose(); }
+            if (wireframe) { scene.remove(wireframe); wireframe.geometry.dispose(); wireframe.material.dispose(); }
+
+            bottomPlanes.forEach(p => {
+                scene.remove(p);
+                p.geometry.dispose();
+                p.material.dispose();
+            });
+            bottomPlanes = [];
+
+            createFurnaceMesh(globalProfileData);
+            precomputeIDW();
+
+            // Adjust camera
+            if (isCroppedMode) {
+                controls.target.set(0, 3000, 0);
+            } else {
+                controls.target.set(0, 7000, 0);
+            }
+
+            const date = dates[parseInt(slider.value)];
+            updateHeatmap(date);
+        });
+    }
+
+    // Isolate Planes Button
+    const isolateBtn = document.getElementById('isolatePlanesBtn');
+    if (isolateBtn) {
+        isolateBtn.addEventListener('click', () => {
+            isIsolatedMode = !isIsolatedMode;
+            isolateBtn.textContent = isIsolatedMode ? "Restore Furnace Shell" : "Isolate Stacked Planes";
+
+            if (isIsolatedMode) {
+                isolateBtn.style.background = "#ff00ff";
+                isolateBtn.style.color = "#000";
+            } else {
+                isolateBtn.style.background = "#600060";
+                isolateBtn.style.color = "#fff";
+            }
+
+            const date = dates[parseInt(slider.value)];
+            updateHeatmap(date);
+        });
+    }
+
     updateHeatmap(initialDate);
 }
 
@@ -370,13 +509,30 @@ function updateHeatmap(date) {
         const mesh = thermocoupleMeshes[id];
         const temp = dailyTemps[id];
 
-        if (temp !== undefined) {
-            let t = (temp - minTemp) / (maxTemp - minTemp);
-            t = Math.max(0, Math.min(1, t)); // Clamp
+        if (isCroppedMode && mesh.userData.rawZ > 6637) {
+            mesh.visible = false;
+            mesh.userData.temp = undefined;
+            continue;
+        }
 
-            // Simple Heatmap Color (Hue: 240 -> 0)
+        if (temp !== undefined) {
+            // Custom Heatmap Color Logic
+            // Blue (<250) -> Yellow (250) -> Red (450) -> Dark Brown (>450)
             const color = new THREE.Color();
-            color.setHSL((1.0 - t) * 0.66, 1.0, 0.5); // Blue(0.66) to Red(0.0)
+            if (temp < 250) {
+                // Gradient of blue down to ~50C
+                const factor = Math.max(0, (temp - 50) / 200);
+                color.lerpColors(new THREE.Color(0x000044), new THREE.Color(0x0088ff), factor);
+            } else if (temp < 450) {
+                // Yellow to Red transition
+                const factor = (temp - 250) / 200;
+                color.lerpColors(new THREE.Color(0xffff00), new THREE.Color(0xff0000), factor);
+            } else {
+                // Red to Dark Brown transition
+                // Cap mapping to 1000C for maximum dark brown point
+                const factor = Math.min(1, (temp - 450) / 550);
+                color.lerpColors(new THREE.Color(0xff0000), new THREE.Color(0x3e1700), factor);
+            }
 
             mesh.material.color.copy(color);
             mesh.material.emissive.copy(color);
@@ -394,22 +550,36 @@ function updateHeatmap(date) {
     // 2. Update Shell (Heatmap Mode)
     if (!meshOuter) return;
 
-    if (isHeatmapMode) {
-        // Switch to Heatmap Material
-        meshOuter.material = materialHeatmap;
-        interpolateTemperatures(dailyTemps, minTemp, maxTemp);
-
-        // Hide other elements for clean look
+    if (isIsolatedMode) {
+        // Completely hide the shell and inner lining when Isolated
+        meshOuter.visible = false;
         if (meshInner) meshInner.visible = false;
         if (wireframe) wireframe.visible = false;
+        bottomPlanes.forEach(p => p.visible = true);
 
+        // Still calculate colors in case we want to show it again, but planes get updated
+        interpolateTemperatures(dailyTemps, minTemp, maxTemp);
     } else {
-        // Switch to Realistic Material
-        meshOuter.material = materialRealistic;
+        meshOuter.visible = true;
+        if (isHeatmapMode) {
+            // Switch to Heatmap Material
+            meshOuter.material = materialHeatmap;
+            interpolateTemperatures(dailyTemps, minTemp, maxTemp);
 
-        // Show components
-        if (meshInner) meshInner.visible = true;
-        if (wireframe) wireframe.visible = true;
+            // Hide other elements for clean look
+            if (meshInner) meshInner.visible = false;
+            if (wireframe) wireframe.visible = false;
+            bottomPlanes.forEach(p => p.visible = true);
+
+        } else {
+            // Switch to Realistic Material
+            meshOuter.material = materialRealistic;
+
+            // Show components
+            if (meshInner) meshInner.visible = true;
+            if (wireframe) wireframe.visible = true;
+            bottomPlanes.forEach(p => p.visible = false);
+        }
     }
 
     // 3. Update High Temp Table
@@ -425,17 +595,17 @@ function updateHeatmap(date) {
         // Actually thermocoupleMeshes keys are normalized IDs. dailyTemps keys are also normalized IDs.
 
         for (let id in dailyTemps) {
+            const mesh = thermocoupleMeshes[id];
+            if (!mesh || (isCroppedMode && mesh.userData.rawZ > 6637)) continue;
+
             const temp = dailyTemps[id];
             if (temp > 1150) {
                 // Find mesh to get metadata
-                const mesh = thermocoupleMeshes[id];
-                if (mesh) {
-                    highTempTCs.push({
-                        id: mesh.userData.id, // Original ID
-                        pos: mesh.userData.position,
-                        temp: temp
-                    });
-                }
+                highTempTCs.push({
+                    id: mesh.userData.id, // Original ID
+                    pos: mesh.userData.position,
+                    temp: temp
+                });
             }
         }
 
@@ -468,41 +638,39 @@ function updateHeatmap(date) {
 function precomputeIDW() {
     if (!meshOuter || thermocouplePositions.length === 0) return;
 
-    const positions = meshOuter.geometry.attributes.position;
-    const p = 2.0; // Power parameter
+    function computeForGeo(geometry) {
+        const positions = geometry.attributes.position;
+        const weights = new Float32Array(positions.count * thermocouplePositions.length);
+        const p = 2.0; // Power parameter
+        for (let i = 0; i < positions.count; i++) {
+            const vx = positions.getX(i);
+            const vy = positions.getY(i);
+            const vz = positions.getZ(i);
+            const vPos = new THREE.Vector3(vx, vy, vz);
 
-    console.log("Pre-computing IDW weights for", positions.count, "vertices and", thermocouplePositions.length, "TCs...");
+            for (let j = 0; j < thermocouplePositions.length; j++) {
+                const tc = thermocouplePositions[j];
+                const distSq = vPos.distanceToSquared(tc.pos);
+                // Avoid division by zero
+                const dist = Math.sqrt(distSq);
+                let w = 0;
+                if (dist < 0.1) w = 1e9; // extremely large weight for exact match
+                else w = 1.0 / Math.pow(dist, p);
 
-    idwWeights = new Float32Array(positions.count * thermocouplePositions.length);
-    // We implicitly know that for vertex i, weights are at i*numTCs to (i+1)*numTCs
-    // Storing dist^p inverse
-
-    for (let i = 0; i < positions.count; i++) {
-        const vx = positions.getX(i);
-        const vy = positions.getY(i);
-        const vz = positions.getZ(i);
-        const vPos = new THREE.Vector3(vx, vy, vz);
-
-        for (let j = 0; j < thermocouplePositions.length; j++) {
-            const tc = thermocouplePositions[j];
-            const distSq = vPos.distanceToSquared(tc.pos);
-            // Avoid division by zero
-            const dist = Math.sqrt(distSq);
-            let w = 0;
-            if (dist < 0.1) w = 1e9; // extremely large weight for exact match
-            else w = 1.0 / Math.pow(dist, p);
-
-            idwWeights[i * thermocouplePositions.length + j] = w;
+                weights[i * thermocouplePositions.length + j] = w;
+            }
         }
+        return weights;
     }
-    console.log("IDW Pre-computation output done.");
+
+    console.log("Pre-computing IDW weights for all geometries...");
+    idwWeightsOuter = computeForGeo(meshOuter.geometry);
+    bottomPlaneWeights = bottomPlanes.map(plane => computeForGeo(plane.geometry));
+    console.log("IDW Pre-computation complete.");
 }
 
 function interpolateTemperatures(dailyTemps, minTemp, maxTemp) {
-    if (idwWeights.length === 0) return;
-
-    const positions = meshOuter.geometry.attributes.position;
-    const colors = meshOuter.geometry.attributes.color;    // Opacity handled by material switch
+    if (idwWeightsOuter.length === 0) return;
 
     const numTCs = thermocouplePositions.length;
 
@@ -513,6 +681,11 @@ function interpolateTemperatures(dailyTemps, minTemp, maxTemp) {
 
     for (let j = 0; j < numTCs; j++) {
         const tc = thermocouplePositions[j];
+        if (isCroppedMode && tc.pos.y > 6637) {
+            activeFlags[j] = 0;
+            continue;
+        }
+
         const rawId = parseInt(tc.id).toString();
         const t = dailyTemps[rawId];
         if (t !== undefined) {
@@ -523,38 +696,51 @@ function interpolateTemperatures(dailyTemps, minTemp, maxTemp) {
         }
     }
 
-    for (let i = 0; i < positions.count; i++) {
-        let sumWeights = 0;
-        let weightedTemp = 0;
-        const offset = i * numTCs;
+    function applyToMesh(mesh, weights) {
+        if (!mesh || !weights) return;
+        const positions = mesh.geometry.attributes.position;
+        const colors = mesh.geometry.attributes.color;
 
-        for (let j = 0; j < numTCs; j++) {
-            if (activeFlags[j] === 0) continue; // Skip missing data
+        for (let i = 0; i < positions.count; i++) {
+            let sumWeights = 0;
+            let weightedTemp = 0;
+            const offset = i * numTCs;
 
-            const w = idwWeights[offset + j];
-            weightedTemp += activeTemps[j] * w;
-            sumWeights += w;
+            for (let j = 0; j < numTCs; j++) {
+                if (activeFlags[j] === 0) continue; // Skip missing data
+
+                const w = weights[offset + j];
+                weightedTemp += activeTemps[j] * w;
+                sumWeights += w;
+            }
+
+            let finalTemp = minTemp;
+            if (sumWeights > 0) {
+                finalTemp = weightedTemp / sumWeights;
+            }
+
+            // Custom Gradient Logic matching the spheres
+            const color = new THREE.Color();
+            if (finalTemp < 250) {
+                const factor = Math.max(0, (finalTemp - 50) / 200);
+                color.lerpColors(new THREE.Color(0x000044), new THREE.Color(0x0088ff), factor);
+            } else if (finalTemp < 450) {
+                const factor = (finalTemp - 250) / 200;
+                color.lerpColors(new THREE.Color(0xffff00), new THREE.Color(0xff0000), factor);
+            } else {
+                const factor = Math.min(1, (finalTemp - 450) / 550);
+                color.lerpColors(new THREE.Color(0xff0000), new THREE.Color(0x3e1700), factor);
+            }
+
+            colors.setXYZ(i, color.r, color.g, color.b);
         }
-
-        let finalTemp = minTemp;
-        if (sumWeights > 0) {
-            finalTemp = weightedTemp / sumWeights;
-        }
-
-        // Color mapping
-        // Heatmap: Blue(Low) -> Green -> Red(High)
-        let t = (finalTemp - minTemp) / (maxTemp - minTemp);
-        t = Math.max(0, Math.min(1, t));
-
-        // HSL mapping: Blue = 0.66, Red = 0.0
-        const hue = (1.0 - t) * 0.66;
-
-        // Convert HSL to RGB manually for speed or use THREE.Color
-        const color = new THREE.Color().setHSL(hue, 1.0, 0.5);
-        colors.setXYZ(i, color.r, color.g, color.b);
+        colors.needsUpdate = true;
     }
 
-    colors.needsUpdate = true;
+    applyToMesh(meshOuter, idwWeightsOuter);
+    for (let i = 0; i < bottomPlanes.length; i++) {
+        applyToMesh(bottomPlanes[i], bottomPlaneWeights[i]);
+    }
 }
 
 function onWindowResize() {
@@ -601,5 +787,29 @@ function animate() {
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
+}
+
+function createTextSprite(text, position, color = "white", fontSize = 40) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = color;
+    ctx.font = `bold ${fontSize}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 128, 64);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    const spriteMaterial = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+    const sprite = new THREE.Sprite(spriteMaterial);
+
+    sprite.position.copy(position);
+    sprite.scale.set(1500, 750, 1);
+    sprite.renderOrder = 999; // Render on top of grid lines
+
+    return sprite;
 }
 

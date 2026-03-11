@@ -102,6 +102,18 @@
         <span id="dateLabel">Loading Data...</span>
         <input type="range" id="dateSlider" disabled>
         <button id="toggleBtn">Switch to Heatmap View</button>
+        <button id="heightToggleBtn"
+            style="margin-top: 10px; padding: 8px 16px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Switch
+            to Full Height</button>
+        <button id="isolatePlanesBtn"
+            style="margin-top: 10px; padding: 8px 16px; background: #600060; color: #fff; border: 1px solid #ff77ff; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Isolate
+            Stacked Planes</button>
+        <select id="sliceMode"
+            style="margin-top: 10px; padding: 8px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">
+            <option value="none">Full 3D View</option>
+            <option value="x">Split View (Cut X-Axis)</option>
+            <option value="y">Split View (Cut Y-Axis)</option>
+        </select>
     </div>
 
     <!-- Panel for High Temp TCs -->
@@ -134,7 +146,7 @@
             </tbody>
         </table>
     </div>
-    <script type="module" src="./script.js"></script>
+    <script type="module" src="./script.js?v=7"></script>
 </body>
 
 </html>

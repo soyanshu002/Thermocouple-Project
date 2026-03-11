@@ -17,7 +17,7 @@ THERMOCOUPLE_FILE = os.path.join(PROJECT_ROOT, 'thermocouples.csv')
 DATA_FILE = os.path.join(PROJECT_ROOT, 'value_rf_imputed.csv')
 OUTPUT_JSON = os.path.join(PROJECT_ROOT, 'visualization', 'temperatures.json')
 CRITICAL_TEMP = 600          
-Z_LEVELS_OF_INTEREST = [6637, 6177, 5777]  # Topmost Bottom Layer, Warning, Critical
+Z_LEVELS_OF_INTEREST = [6637,6177, 5177]  # Topmost Bottom Layer, Warning, Critical
 
 def predict_metric(daily, critical_temp):
     # Helper to predict based on a already aggregated daily metric
