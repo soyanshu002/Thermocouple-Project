@@ -108,12 +108,17 @@
         <button id="isolatePlanesBtn"
             style="margin-top: 10px; padding: 8px 16px; background: #600060; color: #fff; border: 1px solid #ff77ff; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Isolate
             Stacked Planes</button>
-        <select id="sliceMode"
+        <select id="sectorSelect"
             style="margin-top: 10px; padding: 8px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">
-            <option value="none">Full 3D View</option>
-            <option value="x">Split View (Cut X-Axis)</option>
-            <option value="y">Split View (Cut Y-Axis)</option>
+            <option value="all">View All Sectors (360°)</option>
+            <option value="0">Sector 0-60°</option>
+            <option value="1">Sector 60-120°</option>
+            <option value="2">Sector 120-180°</option>
+            <option value="3">Sector 180-240°</option>
+            <option value="4">Sector 240-300°</option>
+            <option value="5">Sector 300-360°</option>
         </select>
+        <select id="sliceMode"
     </div>
 
     <!-- Panel for High Temp TCs -->

@@ -135,6 +135,58 @@ function init() {
             }
         });
     }
+
+    // Sector Select Setup
+    const sectorSelect = document.getElementById('sectorSelect');
+    if (sectorSelect) {
+        sectorSelect.addEventListener('change', () => {
+            const val = sectorSelect.value;
+            if (val === 'all') {
+                renderer.clippingPlanes = [];
+                // Unhide all TCs
+                for (let id in thermocoupleMeshes) thermocoupleMeshes[id].parent.visible = true;
+            } else {
+                const sIdx = parseInt(val);
+                const theta1 = (sIdx * 60) * (Math.PI / 180);
+                const theta2 = ((sIdx + 1) * 60) * (Math.PI / 180);
+
+                // Create two clipping planes to form a 60-degree wedge
+                // Plane 1: Normal points CCW from theta1
+                const n1 = new THREE.Vector3(-Math.sin(theta1), 0, Math.cos(theta1));
+                // Plane 2: Normal points CW from theta2
+                const n2 = new THREE.Vector3(Math.sin(theta2), 0, -Math.cos(theta2));
+
+                renderer.clippingPlanes = [
+                    new THREE.Plane(n1, 0),
+                    new THREE.Plane(n2, 0)
+                ];
+
+                // Filter TCs: Hide those outside the sector
+                // In script.js geometry: theta = atan2(pos.z, pos.x)
+                for (let id in thermocoupleMeshes) {
+                    const mesh = thermocoupleMeshes[id];
+                    const pos = mesh.parent.position;
+                    let angle = Math.atan2(pos.z, pos.x);
+                    if (angle < 0) angle += Math.PI * 2;
+                    
+                    const inSector = (angle >= theta1 && angle <= theta2);
+                    mesh.parent.visible = inSector;
+                }
+
+                // Tilt camera to face the sector
+                const midTheta = (theta1 + theta2) / 2;
+                const dist = isCroppedMode ? 15000 : 25000;
+                const camX = Math.cos(midTheta) * dist;
+                const camZ = Math.sin(midTheta) * dist;
+                const camY = isCroppedMode ? 8000 : 15000;
+                
+                // Animate or jump camera
+                camera.position.set(camX, camY, camZ);
+                const targetY = isCroppedMode ? 3000 : 7000;
+                controls.target.set(0, targetY, 0);
+            }
+        });
+    }
 }
 
 async function loadData() {
