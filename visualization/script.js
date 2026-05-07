@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
 let camera, scene, renderer, controls;
 let raycaster, pointer;
@@ -186,6 +187,12 @@ function init() {
                 controls.target.set(0, targetY, 0);
             }
         });
+    }
+
+    // Export GLTF Setup
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+        exportBtn.addEventListener('click', exportGLTF);
     }
 }
 
@@ -833,6 +840,47 @@ function onPointerMove(event) {
         tooltip.style.display = 'none';
         document.body.style.cursor = 'default';
     }
+}
+
+function exportGLTF() {
+    const exporter = new GLTFExporter();
+    
+    const exportObjects = [];
+    if (meshOuter && meshOuter.visible) exportObjects.push(meshOuter);
+    if (meshInner && meshInner.visible) exportObjects.push(meshInner);
+    
+    for (let id in thermocoupleMeshes) {
+        if (thermocoupleMeshes[id].parent.visible) {
+            exportObjects.push(thermocoupleMeshes[id].parent);
+        }
+    }
+    
+    if (bottomPlanes && bottomPlanes.length > 0) {
+        bottomPlanes.forEach(p => {
+            if (p.visible) exportObjects.push(p);
+        });
+    }
+    
+    exporter.parse(
+        exportObjects,
+        function (gltf) {
+            const blob = new Blob([gltf], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.style.display = 'none';
+            link.href = url;
+            link.download = 'blast_furnace_model.glb';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        },
+        function (error) {
+            console.error('An error happened during GLTF export:', error);
+            alert('Failed to export 3D model.');
+        },
+        { binary: true } // Export as GLB
+    );
 }
 
 function animate() {
