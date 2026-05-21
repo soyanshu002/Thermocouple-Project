@@ -16,22 +16,44 @@
 
         #info {
             position: absolute;
-            top: 10px;
-            width: 100%;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 5px 30px;
+            background: rgba(20, 20, 20, 0.85);
+            backdrop-filter: blur(10px);
+            border-radius: 12px;
+            border: 1px solid #444;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
             text-align: center;
             pointer-events: none;
-            z-index: 100;
+            z-index: 500;
+        }
+        
+        #titleLabel {
+            margin: 10px 0 5px 0;
+            font-size: 1.5em;
+        }
+        
+        #instructionLabel {
+            margin: 5px 0 10px 0;
+            font-size: 1em;
+            color: #ccc;
         }
 
         #tooltip {
             position: absolute;
-            background: rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.9);
             color: white;
-            padding: 5px;
-            border-radius: 4px;
+            padding: 8px 12px;
+            border-radius: 6px;
             pointer-events: none;
             display: none;
-            z-index: 100;
+            z-index: 1000;
+            border: 1px solid #555;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            font-size: 13px;
+            line-height: 1.4;
         }
 
         #controls {
@@ -39,12 +61,39 @@
             bottom: 30px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(30, 30, 30, 0.8);
+            background: rgba(20, 20, 20, 0.85);
+            backdrop-filter: blur(10px);
             padding: 15px;
-            border-radius: 10px;
+            border-radius: 12px;
             text-align: center;
+            border: 1px solid #444;
+            z-index: 500;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .tab-btn {
+            padding: 10px 20px;
+            background: rgba(30, 30, 30, 0.8);
+            backdrop-filter: blur(5px);
+            color: #aaa;
             border: 1px solid #555;
-            z-index: 100;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s ease-in-out;
+        }
+        .tab-btn:hover {
+            background: rgba(50, 50, 50, 0.9);
+            color: #fff;
+            border-color: #777;
+        }
+        .tab-btn.active {
+            background: #0078D4;
+            color: #fff;
+            border-color: #005A9E;
+            box-shadow: 0 0 10px rgba(0, 120, 212, 0.5);
         }
 
         #dateLabel {
@@ -93,59 +142,117 @@
 </head>
 
 <body>
+    <div style="position: absolute; top: 15px; left: 15px; z-index: 500; display: flex; gap: 10px;">
+        <button id="btn3D" class="tab-btn active">3D View</button>
+        <button id="btn2D" class="tab-btn">2D Isotherm View</button>
+        <button id="btnToggleControls" class="tab-btn" style="background: rgba(60, 60, 60, 0.8);">Hide Controls</button>
+    </div>
+
     <div id="info">
-        <h1>Blast Furnace Thermocouple Visualization</h1>
-        <p>Left Click: Rotate | Right Click: Pan | Scroll: Zoom</p>
+        <h1 id="titleLabel">Blast Furnace Thermocouple Visualization</h1>
+        <p id="instructionLabel">Left Click: Rotate | Right Click: Pan | Scroll: Zoom</p>
     </div>
     <div id="tooltip"></div>
+
+    <div id="container2D" style="display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #ffffff; z-index: 10;">
+        <canvas id="canvas2D" style="width: 100%; height: 100%; display: block;"></canvas>
+    </div>
+
     <div id="controls">
-        <span id="dateLabel">Loading Data...</span>
-        <input type="range" id="dateSlider" disabled>
-        <button id="toggleBtn">Switch to Heatmap View</button>
-        <button id="heightToggleBtn"
-            style="margin-top: 10px; padding: 8px 16px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Switch
-            to Full Height</button>
-        <button id="isolatePlanesBtn"
-            style="margin-top: 10px; padding: 8px 16px; background: #600060; color: #fff; border: 1px solid #ff77ff; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Isolate
-            Stacked Planes</button>
-        <select id="sectorSelect"
-            style="margin-top: 10px; padding: 8px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">
-            <option value="all">View All Sectors (360°)</option>
-            <option value="0">Sector 0-60°</option>
-            <option value="1">Sector 60-120°</option>
-            <option value="2">Sector 120-180°</option>
-            <option value="3">Sector 180-240°</option>
-            <option value="4">Sector 240-300°</option>
-            <option value="5">Sector 300-360°</option>
-        </select>
-        <button id="exportBtn"
-            style="margin-top: 10px; padding: 8px 16px; background: #0078D4; color: #fff; border: 1px solid #005A9E; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Export 3D Model (for PPT)</button>
-        <select id="sliceMode"
+        <div style="margin-bottom: 12px; display: flex; align-items: center; justify-content: center; gap: 15px;">
+            <span id="dateLabel" style="font-weight: bold; font-size: 1.1em; min-width: 150px; text-align: left;">Loading Data...</span>
+            <input type="range" id="dateSlider" style="width: 350px;" disabled>
+        </div>
+        
+        <!-- 3D Controls -->
+        <div id="controls3D" style="display: block;">
+            <button id="toggleBtn">Switch to Heatmap View</button>
+            <button id="heightToggleBtn"
+                style="margin-top: 10px; padding: 8px 16px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Switch
+                to Full Height</button>
+            <button id="isolatePlanesBtn"
+                style="margin-top: 10px; padding: 8px 16px; background: #600060; color: #fff; border: 1px solid #ff77ff; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Isolate
+                Stacked Planes</button>
+            <select id="sectorSelect"
+                style="margin-top: 10px; padding: 8px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">
+                <option value="all">View All Sectors (360°)</option>
+                <option value="0">Sector 0-60°</option>
+                <option value="1">Sector 60-120°</option>
+                <option value="2">Sector 120-180°</option>
+                <option value="3">Sector 180-240°</option>
+                <option value="4">Sector 240-300°</option>
+                <option value="5">Sector 300-360°</option>
+            </select>
+            <button id="exportBtn"
+                style="margin-top: 10px; padding: 8px 16px; background: #0078D4; color: #fff; border: 1px solid #005A9E; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">Export 3D Model (for PPT)</button>
+            <select id="sliceMode"
+                style="margin-top: 10px; padding: 8px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; cursor: pointer; font-size: 14px; margin-left: 5px;">
+                <option value="none">No Slicing</option>
+                <option value="x">Slice X-Axis</option>
+                <option value="y">Slice Y-Axis</option>
+            </select>
+        </div>
+
+        <!-- 2D Controls -->
+        <div id="controls2D" style="display: none; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
+            <select id="planeSelect" style="padding: 8px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; font-size: 14px; cursor: pointer;">
+                <option value="35-215">Slice Plane: 35° - 215° (Tuyeres 07-25)</option>
+                <option value="0-180">Slice Plane: 0° - 180°</option>
+                <option value="63-243">Slice Plane: 63° - 243°</option>
+                <option value="90-270">Slice Plane: 90° - 270°</option>
+                <option value="117-297">Slice Plane: 117° - 297°</option>
+                <option value="145-325">Slice Plane: 145° - 325°</option>
+            </select>
+            <div style="display: inline-flex; align-items: center; gap: 6px; margin-left: 5px;">
+                <label for="tempThresholdInput" style="font-size: 14px; color: #ff4444; font-weight: bold;">Isotherm:</label>
+                <input type="number" id="tempThresholdInput" value="1150" min="100" max="1500" step="50" style="width: 70px; padding: 6px; background: #444; color: #fff; border: 1px solid #666; border-radius: 4px; text-align: center; font-weight: bold;">
+                <span style="font-size: 14px; color: #ccc;">°C</span>
+            </div>
+            <div style="display: inline-flex; align-items: center; gap: 15px; margin-left: 10px; font-size: 14px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #ddd;">
+                    <input type="checkbox" id="showHeatmap2D" checked> Heatmap
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #ddd;">
+                    <input type="checkbox" id="showNodes2D" checked> TC Nodes
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #ddd;">
+                    <input type="checkbox" id="showOtherIsotherms" checked> Other Isotherms
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer; color: #ddd;">
+                    <input type="checkbox" id="showOriginalProfile" checked> Refractory Design
+                </label>
+                <button id="resetView2DBtn" style="padding: 6px 12px; background: #333; color: #fff; border: 1px solid #666; border-radius: 4px; font-size: 13px; cursor: pointer; font-weight: bold; transition: background 0.2s;">
+                    Reset Zoom/Pan
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Panel for High Temp TCs -->
     <div id="highTempPanel" style="
         position: absolute;
-        top: 10px;
-        right: 10px;
-        width: 300px;
+        top: 15px;
+        right: 15px;
+        width: 320px;
         max-height: 80vh;
         overflow-y: auto;
-        background: rgba(30, 30, 30, 0.9);
-        border: 1px solid #555;
-        border-radius: 8px;
-        padding: 10px;
+        background: rgba(20, 20, 20, 0.85);
+        backdrop-filter: blur(10px);
+        border: 1px solid #444;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        border-radius: 12px;
+        padding: 15px;
         font-size: 14px;
-        z-index: 100;
+        z-index: 500;
     ">
-        <h3 style="margin-top: 0; color: #ff4444;">High Temp TCs (>1150°C)</h3>
-        <div id="highTempCount" style="margin-bottom: 5px; font-weight: bold;">Count: 0</div>
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+        <h3 style="margin-top: 0; margin-bottom: 8px; color: #ff5555; font-size: 1.1em; border-bottom: 1px solid #555; padding-bottom: 8px;">High Temp TCs (>1150°C)</h3>
+        <div id="highTempCount" style="margin-bottom: 10px; font-weight: bold; color: #ddd; font-size: 0.95em;">Count: 0</div>
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
             <thead>
-                <tr style="border-bottom: 1px solid #777;">
-                    <th style="text-align: left; padding: 4px;">ID</th>
-                    <th style="text-align: left; padding: 4px;">Pos</th>
-                    <th style="text-align: right; padding: 4px;">Temp</th>
+                <tr style="border-bottom: 1px solid #666;">
+                    <th style="text-align: left; padding: 6px 4px; color: #bbb;">ID</th>
+                    <th style="text-align: left; padding: 6px 4px; color: #bbb;">Pos</th>
+                    <th style="text-align: right; padding: 6px 4px; color: #bbb;">Temp</th>
                 </tr>
             </thead>
             <tbody id="highTempList">

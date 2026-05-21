@@ -21,6 +21,46 @@ let bottomPlaneWeights = [];
 // Storing flat arrays for performance? Or array of objects? 
 // For 6000 vertices, array of arrays is fine.
 
+// 2D Isotherm View state variables
+let is3DMode = true;
+let active2DSlice = '35-215';
+let isothermThreshold = 1150;
+let showHeatmap2D = true;
+let showNodes2D = true;
+let showOtherIsotherms = true;
+let showOriginalProfile = true;
+
+let canvas2D, ctx2D;
+let projectedTCs = [];
+let hoveredNode2D = null;
+
+const gridRows = 100;
+const gridCols = 150;
+let gridValues = [];
+let gridR = [];
+let gridZ = [];
+
+let scale2D = 1.0;
+let offsetX2D = 0;
+let offsetY2D = 0;
+const minR = -7600;
+const maxR = 7600;
+const minZ = 3500;
+const maxZ = 14100;
+
+let offscreenCanvas = null;
+let offscreenCtx = null;
+
+// 2D Zoom & Pan state variables
+let zoom2D = 1.0;
+let panX2D = 0;
+let panY2D = 0;
+let isDragging2D = false;
+let startDragX = 0;
+let startDragY = 0;
+let startPanX = 0;
+let startPanY = 0;
+
 
 const tooltip = document.getElementById('tooltip');
 
@@ -194,6 +234,133 @@ function init() {
     if (exportBtn) {
         exportBtn.addEventListener('click', exportGLTF);
     }
+
+    // 2D View setup
+    canvas2D = document.getElementById('canvas2D');
+    if (canvas2D) {
+        ctx2D = canvas2D.getContext('2d');
+        window.addEventListener('resize', handle2DResize);
+        canvas2D.addEventListener('mousemove', onCanvasMouseMove);
+        canvas2D.addEventListener('mousedown', onCanvasMouseDown);
+        canvas2D.addEventListener('mouseup', onCanvasMouseUp);
+        canvas2D.addEventListener('mouseleave', onCanvasMouseLeave);
+        canvas2D.addEventListener('wheel', onCanvasWheel, { passive: false });
+        canvas2D.addEventListener('dblclick', onCanvasDblClick);
+    }
+
+    const btn3D = document.getElementById('btn3D');
+    const btn2D = document.getElementById('btn2D');
+    const container2D = document.getElementById('container2D');
+    const controls3D = document.getElementById('controls3D');
+    const controls2D = document.getElementById('controls2D');
+    const titleLabel = document.getElementById('titleLabel');
+    const instructionLabel = document.getElementById('instructionLabel');
+
+    if (btn3D && btn2D) {
+        btn3D.addEventListener('click', () => {
+            is3DMode = true;
+            btn3D.classList.add('active');
+            btn2D.classList.remove('active');
+            renderer.domElement.style.display = 'block';
+            container2D.style.display = 'none';
+            controls3D.style.display = 'block';
+            controls2D.style.display = 'none';
+            if (titleLabel) titleLabel.textContent = 'Blast Furnace Thermocouple Visualization';
+            if (instructionLabel) instructionLabel.innerHTML = 'Left Click: Rotate | Right Click: Pan | Scroll: Zoom';
+        });
+
+        btn2D.addEventListener('click', () => {
+            is3DMode = false;
+            btn2D.classList.add('active');
+            btn3D.classList.remove('active');
+            renderer.domElement.style.display = 'none';
+            container2D.style.display = 'block';
+            controls3D.style.display = 'none';
+            controls2D.style.display = 'flex';
+            if (titleLabel) titleLabel.textContent = 'Blast Furnace Isotherm Cross-Section (2D)';
+            if (instructionLabel) instructionLabel.innerHTML = 'Drag: Pan | Scroll: Zoom | Double Click / Button: Reset | Hover: Inspect TCs';
+            handle2DResize();
+            trigger2DRender();
+        });
+    }
+
+    const btnToggleControls = document.getElementById('btnToggleControls');
+    const mainControlsPanel = document.getElementById('controls');
+    if (btnToggleControls && mainControlsPanel) {
+        let controlsVisible = true;
+        btnToggleControls.addEventListener('click', () => {
+            controlsVisible = !controlsVisible;
+            if (controlsVisible) {
+                mainControlsPanel.style.bottom = '30px';
+                mainControlsPanel.style.opacity = '1';
+                mainControlsPanel.style.pointerEvents = 'auto';
+                btnToggleControls.textContent = 'Hide Controls';
+            } else {
+                mainControlsPanel.style.bottom = '-200px';
+                mainControlsPanel.style.opacity = '0';
+                mainControlsPanel.style.pointerEvents = 'none';
+                btnToggleControls.textContent = 'Show Controls';
+            }
+        });
+    }
+
+    const planeSelect = document.getElementById('planeSelect');
+    if (planeSelect) {
+        planeSelect.addEventListener('change', (e) => {
+            active2DSlice = e.target.value;
+            trigger2DRender();
+        });
+    }
+
+    const tempThresholdInput = document.getElementById('tempThresholdInput');
+    if (tempThresholdInput) {
+        tempThresholdInput.addEventListener('input', (e) => {
+            let val = parseInt(e.target.value);
+            if (!isNaN(val) && val >= 0) {
+                isothermThreshold = val;
+                trigger2DRender();
+            }
+        });
+    }
+
+    const chkHeatmap = document.getElementById('showHeatmap2D');
+    if (chkHeatmap) {
+        chkHeatmap.addEventListener('change', (e) => {
+            showHeatmap2D = e.target.checked;
+            trigger2DRender();
+        });
+    }
+    const chkNodes = document.getElementById('showNodes2D');
+    if (chkNodes) {
+        chkNodes.addEventListener('change', (e) => {
+            showNodes2D = e.target.checked;
+            trigger2DRender();
+        });
+    }
+    const chkOther = document.getElementById('showOtherIsotherms');
+    if (chkOther) {
+        chkOther.addEventListener('change', (e) => {
+            showOtherIsotherms = e.target.checked;
+            trigger2DRender();
+        });
+    }
+    const chkProfile = document.getElementById('showOriginalProfile');
+    if (chkProfile) {
+        chkProfile.addEventListener('change', (e) => {
+            showOriginalProfile = e.target.checked;
+            trigger2DRender();
+        });
+    }
+
+    const resetView2DBtn = document.getElementById('resetView2DBtn');
+    if (resetView2DBtn) {
+        resetView2DBtn.addEventListener('click', () => {
+            zoom2D = 1.0;
+            panX2D = 0;
+            panY2D = 0;
+            trigger2DRender();
+        });
+    }
 }
 
 async function loadData() {
@@ -223,6 +390,9 @@ async function loadData() {
 
         // Pre-compute weights for IDW optimization
         precomputeIDW();
+
+        // Initialize 2D grid
+        initializeGrid();
 
     } catch (error) {
         console.error('Error loading data:', error);
@@ -692,6 +862,11 @@ function updateHeatmap(date) {
             });
         }
     }
+
+    // Update the 2D View if it is active
+    if (!is3DMode) {
+        trigger2DRender();
+    }
 }
 
 function precomputeIDW() {
@@ -911,5 +1086,681 @@ function createTextSprite(text, position, color = "white", fontSize = 40) {
     sprite.renderOrder = 999; // Render on top of grid lines
 
     return sprite;
+}
+
+// ==========================================
+// 2D ISOTHERM VIEW FUNCTIONS
+// ==========================================
+
+function initializeGrid() {
+    gridValues = [];
+    gridR = [];
+    gridZ = [];
+    
+    const rStep = (maxR - minR) / (gridCols - 1);
+    const zStep = (maxZ - minZ) / (gridRows - 1);
+    
+    for (let c = 0; c < gridCols; c++) {
+        gridR.push(minR + c * rStep);
+    }
+    for (let r = 0; r < gridRows; r++) {
+        gridZ.push(minZ + r * zStep);
+    }
+    
+    for (let c = 0; c < gridCols; c++) {
+        gridValues.push(new Float32Array(gridRows));
+    }
+}
+
+function projectThermocouples(sliceAngleStr) {
+    projectedTCs = [];
+    
+    const parts = sliceAngleStr.split('-');
+    const targetAngle0 = parseFloat(parts[0]);
+    const targetAngle1 = parseFloat(parts[1]);
+    
+    const slider = document.getElementById('dateSlider');
+    const date = dates[parseInt(slider.value)];
+    const dailyTemps = temperatureData[date] || {};
+    
+    for (let tc of thermocouplePositions) {
+        const x = tc.pos.x;
+        const y = tc.pos.z; // ThreeJS Z is data Y
+        const z = tc.pos.y; // ThreeJS Y is data Z (height)
+        
+        const r = Math.sqrt(x*x + y*y);
+        let angleRad = Math.atan2(y, x);
+        let angleDeg = angleRad * (180 / Math.PI);
+        if (angleDeg < 0) angleDeg += 360;
+        
+        let isMatch = false;
+        let projectedR = 0;
+        
+        if (r < 10) {
+            isMatch = true;
+            projectedR = 0;
+        } else {
+            const diff0 = Math.min(Math.abs(angleDeg - targetAngle0), 360 - Math.abs(angleDeg - targetAngle0));
+            const diff1 = Math.min(Math.abs(angleDeg - targetAngle1), 360 - Math.abs(angleDeg - targetAngle1));
+            
+            const tolerance = 10.0;
+            
+            if (diff0 <= tolerance) {
+                isMatch = true;
+                projectedR = r;
+            } else if (diff1 <= tolerance) {
+                isMatch = true;
+                projectedR = -r;
+            }
+        }
+        
+        if (isMatch) {
+            const normalizedId = parseInt(tc.id).toString();
+            const temp = dailyTemps[normalizedId];
+            
+            const mesh = thermocoupleMeshes[normalizedId];
+            const posName = mesh ? mesh.userData.position : "";
+            const tcNo = mesh ? mesh.userData.no : "";
+            
+            projectedTCs.push({
+                id: tc.id,
+                no: tcNo,
+                r: projectedR,
+                z: z,
+                temp: temp,
+                posName: posName,
+                angleDeg: angleDeg
+            });
+        }
+    }
+}
+
+function interpolateGrid() {
+    const activeTCs = projectedTCs.filter(tc => tc.temp !== undefined);
+    
+    if (activeTCs.length === 0) {
+        for (let c = 0; c < gridCols; c++) {
+            gridValues[c].fill(0);
+        }
+        return;
+    }
+    
+    const power = 2.0;
+    
+    for (let c = 0; c < gridCols; c++) {
+        const r = gridR[c];
+        for (let rIdx = 0; rIdx < gridRows; rIdx++) {
+            const z = gridZ[rIdx];
+            
+            let sumWeights = 0;
+            let sumWeightedTemp = 0;
+            let exactMatchTemp = null;
+            
+            for (let tc of activeTCs) {
+                const dr = r - tc.r;
+                const dz = z - tc.z;
+                const distSq = dr*dr + dz*dz;
+                const dist = Math.sqrt(distSq);
+                
+                if (dist < 50.0) {
+                    exactMatchTemp = tc.temp;
+                    break;
+                }
+                
+                const w = 1.0 / Math.pow(dist, power);
+                sumWeightedTemp += tc.temp * w;
+                sumWeights += w;
+            }
+            
+            if (exactMatchTemp !== null) {
+                gridValues[c][rIdx] = exactMatchTemp;
+            } else if (sumWeights > 0) {
+                gridValues[c][rIdx] = sumWeightedTemp / sumWeights;
+            } else {
+                gridValues[c][rIdx] = 0;
+            }
+        }
+    }
+}
+
+function getHeatmapColor(temp) {
+    let r = 0, g = 0, b = 0;
+    
+    if (temp < 250) {
+        const factor = Math.max(0, (temp - 50) / 200);
+        r = 0;
+        g = Math.round(136 * factor);
+        b = Math.round(68 + (255 - 68) * factor);
+    } else if (temp < 450) {
+        const factor = (temp - 250) / 200;
+        r = 255;
+        g = Math.round(255 * (1 - factor));
+        b = 0;
+    } else {
+        const factor = Math.min(1, (temp - 450) / 550);
+        r = Math.round(255 + (62 - 255) * factor);
+        g = Math.round(23 * factor);
+        b = 0;
+    }
+    return { r, g, b };
+}
+
+function renderHeatmapToOffscreen() {
+    if (!offscreenCanvas) {
+        offscreenCanvas = document.createElement('canvas');
+        offscreenCanvas.width = gridCols;
+        offscreenCanvas.height = gridRows;
+        offscreenCtx = offscreenCanvas.getContext('2d');
+    }
+    
+    const imgData = offscreenCtx.createImageData(gridCols, gridRows);
+    const data = imgData.data;
+    
+    for (let col = 0; col < gridCols; col++) {
+        for (let row = 0; row < gridRows; row++) {
+            const temp = gridValues[col][row];
+            const color = getHeatmapColor(temp);
+            
+            const imgX = col;
+            const imgY = gridRows - 1 - row;
+            const pixelIdx = (imgY * gridCols + imgX) * 4;
+            
+            data[pixelIdx] = color.r;
+            data[pixelIdx + 1] = color.g;
+            data[pixelIdx + 2] = color.b;
+            data[pixelIdx + 3] = 255;
+        }
+    }
+    
+    offscreenCtx.putImageData(imgData, 0, 0);
+}
+
+function updateScale() {
+    const width = canvas2D.width;
+    const height = canvas2D.height;
+    
+    const physicalWidth = maxR - minR;
+    const physicalHeight = maxZ - minZ;
+    
+    const margin = 60;
+    const scaleX = (width - margin * 2) / physicalWidth;
+    const scaleY = (height - margin * 2) / physicalHeight;
+    const baseScale = Math.min(scaleX, scaleY);
+    
+    scale2D = baseScale * zoom2D;
+    
+    offsetX2D = (width - physicalWidth * scale2D) / 2 - minR * scale2D + panX2D;
+    offsetY2D = height - (height - physicalHeight * scale2D) / 2 + minZ * scale2D + panY2D;
+}
+
+function rToX(r) {
+    return offsetX2D + r * scale2D;
+}
+
+function zToY(z) {
+    return offsetY2D - z * scale2D;
+}
+
+function xToR(x) {
+    return (x - offsetX2D) / scale2D;
+}
+
+function yToZ(y) {
+    return (offsetY2D - y) / scale2D;
+}
+
+function isInsideRefractory(r, z) {
+    if (z < 3946 || z > 13900) return false;
+    const absR = Math.abs(r);
+    if (absR > 7320) return false;
+    
+    if (z >= 7100) {
+        return absR >= 6600;
+    } else {
+        return true;
+    }
+}
+
+function clipToRefractory(ctx) {
+    ctx.beginPath();
+    ctx.moveTo(rToX(-7320), zToY(13900));
+    ctx.lineTo(rToX(-7320), zToY(3946));
+    ctx.lineTo(rToX(7320), zToY(3946));
+    ctx.lineTo(rToX(7320), zToY(13900));
+    ctx.lineTo(rToX(6600), zToY(13900));
+    ctx.lineTo(rToX(6600), zToY(7100));
+    ctx.lineTo(rToX(-6600), zToY(7100));
+    ctx.lineTo(rToX(-6600), zToY(13900));
+    ctx.closePath();
+    ctx.clip();
+}
+
+function getEdgePoint(edgeIndex, r0, r1, z0, z1, v0, v1, v2, v3, Tiso) {
+    let t, r_val, z_val;
+    switch(edgeIndex) {
+        case 0: // bottom
+            t = (Tiso - v0) / (v1 - v0);
+            r_val = r0 + t * (r1 - r0);
+            z_val = z0;
+            break;
+        case 1: // right
+            t = (Tiso - v1) / (v2 - v1);
+            r_val = r1;
+            z_val = z0 + t * (z1 - z0);
+            break;
+        case 2: // top
+            t = (Tiso - v2) / (v3 - v2);
+            r_val = r1 + t * (r0 - r1);
+            z_val = z1;
+            break;
+        case 3: // left
+            t = (Tiso - v3) / (v0 - v3);
+            r_val = r0;
+            z_val = z1 + t * (z0 - z1);
+            break;
+    }
+    return { r: r_val, z: z_val };
+}
+
+function drawSingleIsotherm(tempValue, color, lineWidth) {
+    const segments = [];
+    
+    for (let c = 0; c < gridCols - 1; c++) {
+        const r0 = gridR[c];
+        const r1 = gridR[c+1];
+        
+        for (let rIdx = 0; rIdx < gridRows - 1; rIdx++) {
+            const z0 = gridZ[rIdx];
+            const z1 = gridZ[rIdx+1];
+            
+            const v0 = gridValues[c][rIdx];
+            const v1 = gridValues[c+1][rIdx];
+            const v2 = gridValues[c+1][rIdx+1];
+            const v3 = gridValues[c][rIdx+1];
+            
+            const cellCenterR = (r0 + r1) / 2;
+            const cellCenterZ = (z0 + z1) / 2;
+            if (!isInsideRefractory(cellCenterR, cellCenterZ)) {
+                continue;
+            }
+            
+            let code = 0;
+            if (v0 >= tempValue) code |= 1;
+            if (v1 >= tempValue) code |= 2;
+            if (v2 >= tempValue) code |= 4;
+            if (v3 >= tempValue) code |= 8;
+            
+            const cases = {
+                1: [[0, 3]],
+                2: [[0, 1]],
+                3: [[1, 3]],
+                4: [[1, 2]],
+                5: [[0, 3], [1, 2]],
+                6: [[0, 2]],
+                7: [[2, 3]],
+                8: [[2, 3]],
+                9: [[0, 2]],
+                10: [[0, 1], [2, 3]],
+                11: [[1, 2]],
+                12: [[1, 3]],
+                13: [[0, 1]],
+                14: [[0, 3]]
+            };
+            
+            const conns = cases[code];
+            if (conns) {
+                for (let conn of conns) {
+                    const p1 = getEdgePoint(conn[0], r0, r1, z0, z1, v0, v1, v2, v3, tempValue);
+                    const p2 = getEdgePoint(conn[1], r0, r1, z0, z1, v0, v1, v2, v3, tempValue);
+                    segments.push({ p1, p2 });
+                }
+            }
+        }
+    }
+    
+    ctx2D.save();
+    clipToRefractory(ctx2D);
+    
+    ctx2D.strokeStyle = color;
+    ctx2D.lineWidth = lineWidth;
+    ctx2D.beginPath();
+    for (let seg of segments) {
+        ctx2D.moveTo(rToX(seg.p1.r), zToY(seg.p1.z));
+        ctx2D.lineTo(rToX(seg.p2.r), zToY(seg.p2.z));
+    }
+    ctx2D.stroke();
+    
+    if (segments.length > 8) {
+        const midIdx = Math.floor(segments.length / 2);
+        const midSeg = segments[midIdx];
+        const labelX = rToX((midSeg.p1.r + midSeg.p2.r) / 2);
+        const labelY = zToY((midSeg.p1.z + midSeg.p2.z) / 2);
+        
+        ctx2D.fillStyle = 'rgba(255, 255, 255, 0.9)';
+        ctx2D.font = 'bold 9px sans-serif';
+        const labelText = tempValue + '°C';
+        const textWidth = ctx2D.measureText(labelText).width;
+        
+        ctx2D.fillRect(labelX - textWidth/2 - 3, labelY - 6, textWidth + 6, 12);
+        ctx2D.fillStyle = color;
+        ctx2D.textAlign = 'center';
+        ctx2D.textBaseline = 'middle';
+        ctx2D.fillText(labelText, labelX, labelY);
+    }
+    
+    ctx2D.restore();
+}
+
+function draw2DIsotherm() {
+    if (!canvas2D || !ctx2D) return;
+    
+    ctx2D.fillStyle = '#ffffff';
+    ctx2D.fillRect(0, 0, canvas2D.width, canvas2D.height);
+    
+    updateScale();
+    
+    if (showHeatmap2D) {
+        renderHeatmapToOffscreen();
+        
+        ctx2D.save();
+        clipToRefractory(ctx2D);
+        
+        const x0 = rToX(minR);
+        const y0 = zToY(maxZ);
+        const w = rToX(maxR) - x0;
+        const h = zToY(minZ) - y0;
+        
+        ctx2D.imageSmoothingEnabled = true;
+        ctx2D.drawImage(offscreenCanvas, x0, y0, w, h);
+        ctx2D.restore();
+    }
+    
+    ctx2D.fillStyle = 'rgba(255, 240, 240, 0.85)';
+    ctx2D.beginPath();
+    ctx2D.moveTo(rToX(-6600), zToY(13900));
+    ctx2D.lineTo(rToX(-6600), zToY(7100));
+    ctx2D.lineTo(rToX(6600), zToY(7100));
+    ctx2D.lineTo(rToX(6600), zToY(13900));
+    ctx2D.closePath();
+    ctx2D.fill();
+    
+    ctx2D.strokeStyle = '#eebbbb';
+    ctx2D.lineWidth = 2;
+    ctx2D.stroke();
+    
+    ctx2D.fillStyle = '#b74040';
+    ctx2D.font = 'bold 20px sans-serif';
+    ctx2D.textAlign = 'center';
+    ctx2D.textBaseline = 'middle';
+    ctx2D.fillText("HEARTH CHAMBER (LIQUID METAL)", rToX(0), zToY(10500));
+    
+    if (showOriginalProfile) {
+        ctx2D.strokeStyle = '#cccccc';
+        ctx2D.lineWidth = 10;
+        ctx2D.beginPath();
+        ctx2D.moveTo(rToX(-7400), zToY(13900));
+        ctx2D.lineTo(rToX(-7400), zToY(3946));
+        ctx2D.lineTo(rToX(7400), zToY(3946));
+        ctx2D.lineTo(rToX(7400), zToY(13900));
+        ctx2D.stroke();
+        
+        ctx2D.fillStyle = 'rgba(200, 210, 220, 0.4)';
+        ctx2D.beginPath();
+        ctx2D.rect(rToX(-7400), zToY(13900), 80 * scale2D, (13900 - 3946) * scale2D);
+        ctx2D.rect(rToX(7320), zToY(13900), 80 * scale2D, (13900 - 3946) * scale2D);
+        ctx2D.fill();
+        ctx2D.strokeStyle = '#bbbbbb';
+        ctx2D.lineWidth = 1;
+        ctx2D.stroke();
+        
+        ctx2D.fillStyle = 'rgba(255, 200, 100, 0.08)';
+        ctx2D.strokeStyle = '#ff9900';
+        ctx2D.lineWidth = 1.5;
+        ctx2D.setLineDash([4, 4]);
+        ctx2D.beginPath();
+        ctx2D.rect(rToX(-5800), zToY(7100), 11600 * scale2D, (7100 - 6177) * scale2D);
+        ctx2D.fill();
+        ctx2D.stroke();
+        ctx2D.setLineDash([]);
+        
+        ctx2D.fillStyle = '#cc6600';
+        ctx2D.font = 'bold 10px sans-serif';
+        ctx2D.fillText("MULLITE CERAMIC CUP", rToX(0), zToY(6637));
+        
+        ctx2D.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+        ctx2D.lineWidth = 1;
+        const dividerZ = [4160, 4727, 5177, 5677, 6177, 6637, 7100, 7550, 8450, 9350, 10400, 11600];
+        for (let z of dividerZ) {
+            ctx2D.beginPath();
+            ctx2D.moveTo(rToX(-7320), zToY(z));
+            ctx2D.lineTo(rToX(7320), zToY(z));
+            ctx2D.stroke();
+            
+            ctx2D.fillStyle = '#777777';
+            ctx2D.font = '9px monospace';
+            ctx2D.textAlign = 'left';
+            ctx2D.fillText(`EL. +${z}`, rToX(7450), zToY(z) + 3);
+        }
+        
+        ctx2D.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+        ctx2D.setLineDash([10, 5, 2, 5]);
+        ctx2D.beginPath();
+        ctx2D.moveTo(rToX(0), zToY(3500));
+        ctx2D.lineTo(rToX(0), zToY(13900));
+        ctx2D.stroke();
+        ctx2D.setLineDash([]);
+        ctx2D.fillStyle = '#555555';
+        ctx2D.fillText("C.L. BLAST FURNACE", rToX(0), zToY(14000));
+        ctx2D.textAlign = 'center';
+    }
+    
+    drawSingleIsotherm(isothermThreshold, '#ff2222', 3);
+    
+    if (showOtherIsotherms) {
+        const others = [200, 400, 600, 800, 1000];
+        const colors = ['#0055ff', '#0099aa', '#228800', '#ccaa00', '#cc5500'];
+        for (let i = 0; i < others.length; i++) {
+            if (others[i] !== isothermThreshold) {
+                drawSingleIsotherm(others[i], colors[i], 1.2);
+            }
+        }
+    }
+    
+    if (showNodes2D) {
+        for (let tc of projectedTCs) {
+            const x = rToX(tc.r);
+            const y = zToY(tc.z);
+            
+            const isHovered = (hoveredNode2D && hoveredNode2D.id === tc.id);
+            const rad = isHovered ? 8 : 5;
+            
+            ctx2D.beginPath();
+            ctx2D.arc(x, y, rad + 1.5, 0, Math.PI * 2);
+            ctx2D.fillStyle = isHovered ? '#000000' : '#cccccc';
+            ctx2D.fill();
+            
+            ctx2D.beginPath();
+            ctx2D.arc(x, y, rad, 0, Math.PI * 2);
+            if (tc.temp !== undefined) {
+                const col = getHeatmapColor(tc.temp);
+                ctx2D.fillStyle = `rgb(${col.r}, ${col.g}, ${col.b})`;
+            } else {
+                ctx2D.fillStyle = '#999999';
+            }
+            ctx2D.fill();
+            
+            ctx2D.fillStyle = isHovered ? '#000000' : '#666666';
+            ctx2D.font = isHovered ? 'bold 11px sans-serif' : '9px sans-serif';
+            ctx2D.textAlign = tc.r >= 0 ? 'left' : 'right';
+            const offsetDir = tc.r >= 0 ? 1 : -1;
+            ctx2D.fillText(tc.id, x + 8 * offsetDir, y + 3);
+        }
+    }
+    
+    ctx2D.fillStyle = '#000000';
+    ctx2D.font = 'bold 16px sans-serif';
+    ctx2D.textAlign = 'right';
+    ctx2D.fillText(`Cross Section: ${active2DSlice}° Slice`, canvas2D.width - 20, 40);
+    
+    const slider = document.getElementById('dateSlider');
+    if (slider) {
+        const date = dates[parseInt(slider.value)];
+        ctx2D.font = '14px sans-serif';
+        ctx2D.fillStyle = '#555555';
+        ctx2D.fillText(`Date: ${date}`, canvas2D.width - 20, 65);
+    }
+}
+
+function handle2DResize() {
+    if (!canvas2D) return;
+    canvas2D.width = canvas2D.clientWidth;
+    canvas2D.height = canvas2D.clientHeight;
+    
+    if (!is3DMode) {
+        draw2DIsotherm();
+    }
+}
+
+function trigger2DRender() {
+    if (is3DMode) return;
+    
+    const planeSelect = document.getElementById('planeSelect');
+    const selectedSlice = planeSelect ? planeSelect.value : '35-215';
+    
+    projectThermocouples(selectedSlice);
+    interpolateGrid();
+    draw2DIsotherm();
+}
+
+function onCanvasMouseMove(event) {
+    if (is3DMode || projectedTCs.length === 0) return;
+    
+    if (isDragging2D) {
+        const dx = event.clientX - startDragX;
+        const dy = event.clientY - startDragY;
+        panX2D = startPanX + dx;
+        panY2D = startPanY + dy;
+        draw2DIsotherm();
+        return;
+    }
+    
+    const rect = canvas2D.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    
+    let foundNode = null;
+    let minDist = 15;
+    
+    for (let tc of projectedTCs) {
+        const px = rToX(tc.r);
+        const py = zToY(tc.z);
+        
+        const dist = Math.sqrt((mouseX - px)**2 + (mouseY - py)**2);
+        if (dist < minDist) {
+            minDist = dist;
+            foundNode = tc;
+        }
+    }
+    
+    const tooltip = document.getElementById('tooltip');
+    
+    if (foundNode) {
+        hoveredNode2D = foundNode;
+        document.body.style.cursor = 'pointer';
+        
+        tooltip.style.display = 'block';
+        tooltip.style.left = event.clientX + 15 + 'px';
+        tooltip.style.top = event.clientY + 15 + 'px';
+        
+        const tempStr = foundNode.temp !== undefined ? `${Math.round(foundNode.temp)}°C` : 'N/A';
+        tooltip.innerHTML = `
+            <strong>TC ID: ${foundNode.id}</strong> (No. ${foundNode.no})<br>
+            Position: ${foundNode.posName}<br>
+            Radius: ${Math.round(Math.abs(foundNode.r))} mm (${foundNode.r >= 0 ? '35° Side' : '215° Side'})<br>
+            Height: ${foundNode.z} mm<br>
+            Temperature: <span style="color: #ff5555; font-weight: bold;">${tempStr}</span>
+        `;
+        
+        draw2DIsotherm();
+    } else {
+        if (hoveredNode2D) {
+            hoveredNode2D = null;
+            document.body.style.cursor = 'default';
+            tooltip.style.display = 'none';
+            draw2DIsotherm();
+        }
+    }
+}
+
+function onCanvasMouseDown(event) {
+    if (is3DMode) return;
+    isDragging2D = true;
+    startDragX = event.clientX;
+    startDragY = event.clientY;
+    startPanX = panX2D;
+    startPanY = panY2D;
+    document.body.style.cursor = 'grabbing';
+}
+
+function onCanvasMouseUp(event) {
+    if (is3DMode) return;
+    isDragging2D = false;
+    document.body.style.cursor = 'default';
+}
+
+function onCanvasMouseLeave(event) {
+    if (is3DMode) return;
+    isDragging2D = false;
+    document.body.style.cursor = 'default';
+    const tooltip = document.getElementById('tooltip');
+    if (tooltip) tooltip.style.display = 'none';
+}
+
+function onCanvasWheel(event) {
+    if (is3DMode) return;
+    event.preventDefault();
+    
+    const rect = canvas2D.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    
+    const physR = xToR(mouseX);
+    const physZ = yToZ(mouseY);
+    
+    const zoomIntensity = 0.1;
+    let zoomFactor = 1.0;
+    if (event.deltaY < 0) {
+        zoomFactor = 1 + zoomIntensity;
+    } else {
+        zoomFactor = 1 - zoomIntensity;
+    }
+    
+    zoom2D = Math.max(0.5, Math.min(10.0, zoom2D * zoomFactor));
+    
+    const width = canvas2D.width;
+    const height = canvas2D.height;
+    const physicalWidth = maxR - minR;
+    const physicalHeight = maxZ - minZ;
+    const margin = 60;
+    const scaleX = (width - margin * 2) / physicalWidth;
+    const scaleY = (height - margin * 2) / physicalHeight;
+    const baseScale = Math.min(scaleX, scaleY);
+    
+    const nextScale2D = baseScale * zoom2D;
+    const nextOffsetX = (width - physicalWidth * nextScale2D) / 2 - minR * nextScale2D;
+    const nextOffsetY = height - (height - physicalHeight * nextScale2D) / 2 + minZ * nextScale2D;
+    
+    panX2D = mouseX - (nextOffsetX + physR * nextScale2D);
+    panY2D = mouseY - (nextOffsetY - physZ * nextScale2D);
+    
+    draw2DIsotherm();
+}
+
+function onCanvasDblClick(event) {
+    if (is3DMode) return;
+    zoom2D = 1.0;
+    panX2D = 0;
+    panY2D = 0;
+    draw2DIsotherm();
 }
 
