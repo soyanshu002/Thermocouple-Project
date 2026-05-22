@@ -23,6 +23,8 @@ let bottomPlaneWeights = [];
 
 // 2D Isotherm View state variables
 let is3DMode = true;
+let sliceOrientation2D = 'vertical';
+let sliceElevation2D = 7100;
 let active2DSlice = '35-215';
 let isothermThreshold = 1150;
 let showHeatmap2D = true;
@@ -304,10 +306,45 @@ function init() {
         });
     }
 
-    const planeSelect = document.getElementById('planeSelect');
-    if (planeSelect) {
-        planeSelect.addEventListener('change', (e) => {
-            active2DSlice = e.target.value;
+    const angleControl = document.getElementById('angleControl');
+    const angleSlider2D = document.getElementById('angleSlider2D');
+    const angleLabel = document.getElementById('angleLabel');
+    const orientationSelect = document.getElementById('orientationSelect');
+    const elevationControl = document.getElementById('elevationControl');
+    const elevationSlider2D = document.getElementById('elevationSlider2D');
+    const elevationLabel = document.getElementById('elevationLabel');
+
+    if (orientationSelect) {
+        orientationSelect.addEventListener('change', (e) => {
+            sliceOrientation2D = e.target.value;
+            if (sliceOrientation2D === 'horizontal') {
+                if (angleControl) angleControl.style.display = 'none';
+                if (elevationControl) elevationControl.style.display = 'flex';
+            } else {
+                if (angleControl) angleControl.style.display = 'flex';
+                if (elevationControl) elevationControl.style.display = 'none';
+            }
+            zoom2D = 1.0;
+            panX2D = 0;
+            panY2D = 0;
+            trigger2DRender();
+        });
+    }
+
+    if (elevationSlider2D) {
+        elevationSlider2D.addEventListener('input', (e) => {
+            sliceElevation2D = parseInt(e.target.value);
+            if (elevationLabel) elevationLabel.textContent = '+' + sliceElevation2D;
+            trigger2DRender();
+        });
+    }
+
+    if (angleSlider2D) {
+        angleSlider2D.addEventListener('input', (e) => {
+            let angle0 = parseInt(e.target.value);
+            let angle1 = angle0 + 180;
+            active2DSlice = `${angle0}-${angle1}`;
+            if (angleLabel) angleLabel.textContent = `${angle0}° - ${angle1}°`;
             trigger2DRender();
         });
     }
@@ -1097,14 +1134,17 @@ function initializeGrid() {
     gridR = [];
     gridZ = [];
     
+    const localMinZ = (sliceOrientation2D === 'horizontal') ? -7600 : 3500;
+    const localMaxZ = (sliceOrientation2D === 'horizontal') ? 7600 : 14100;
+    
     const rStep = (maxR - minR) / (gridCols - 1);
-    const zStep = (maxZ - minZ) / (gridRows - 1);
+    const zStep = (localMaxZ - localMinZ) / (gridRows - 1);
     
     for (let c = 0; c < gridCols; c++) {
         gridR.push(minR + c * rStep);
     }
     for (let r = 0; r < gridRows; r++) {
-        gridZ.push(minZ + r * zStep);
+        gridZ.push(localMinZ + r * zStep);
     }
     
     for (let c = 0; c < gridCols; c++) {
@@ -1115,62 +1155,81 @@ function initializeGrid() {
 function projectThermocouples(sliceAngleStr) {
     projectedTCs = [];
     
-    const parts = sliceAngleStr.split('-');
-    const targetAngle0 = parseFloat(parts[0]);
-    const targetAngle1 = parseFloat(parts[1]);
-    
     const slider = document.getElementById('dateSlider');
     const date = dates[parseInt(slider.value)];
     const dailyTemps = temperatureData[date] || {};
     
-    for (let tc of thermocouplePositions) {
-        const x = tc.pos.x;
-        const y = tc.pos.z; // ThreeJS Z is data Y
-        const z = tc.pos.y; // ThreeJS Y is data Z (height)
-        
-        const r = Math.sqrt(x*x + y*y);
-        let angleRad = Math.atan2(y, x);
-        let angleDeg = angleRad * (180 / Math.PI);
-        if (angleDeg < 0) angleDeg += 360;
-        
-        let isMatch = false;
-        let projectedR = 0;
-        
-        if (r < 10) {
-            isMatch = true;
-            projectedR = 0;
-        } else {
-            const diff0 = Math.min(Math.abs(angleDeg - targetAngle0), 360 - Math.abs(angleDeg - targetAngle0));
-            const diff1 = Math.min(Math.abs(angleDeg - targetAngle1), 360 - Math.abs(angleDeg - targetAngle1));
-            
-            const tolerance = 10.0;
-            
-            if (diff0 <= tolerance) {
-                isMatch = true;
-                projectedR = r;
-            } else if (diff1 <= tolerance) {
-                isMatch = true;
-                projectedR = -r;
+    if (sliceOrientation2D === 'horizontal') {
+        const targetZ = sliceElevation2D;
+        for (let tc of thermocouplePositions) {
+            const z = tc.pos.y; // Height
+            if (Math.abs(z - targetZ) <= 1000) { // +/- 1000mm tolerance
+                const normalizedId = parseInt(tc.id).toString();
+                const temp = dailyTemps[normalizedId];
+                const mesh = thermocoupleMeshes[normalizedId];
+                
+                projectedTCs.push({
+                    id: tc.id,
+                    no: mesh ? mesh.userData.no : "",
+                    r: tc.pos.x, // Map X to canvas X (using R array)
+                    z: tc.pos.z, // Map Y to canvas Y (using Z array)
+                    temp: temp,
+                    posName: mesh ? mesh.userData.position : "",
+                    trueZ: z
+                });
             }
         }
+    } else {
+        const parts = sliceAngleStr.split('-');
+        const targetAngle0 = parseFloat(parts[0]);
+        const targetAngle1 = parseFloat(parts[1]);
         
-        if (isMatch) {
-            const normalizedId = parseInt(tc.id).toString();
-            const temp = dailyTemps[normalizedId];
+        for (let tc of thermocouplePositions) {
+            const x = tc.pos.x;
+            const y = tc.pos.z; 
+            const z = tc.pos.y; 
             
-            const mesh = thermocoupleMeshes[normalizedId];
-            const posName = mesh ? mesh.userData.position : "";
-            const tcNo = mesh ? mesh.userData.no : "";
+            const r = Math.sqrt(x*x + y*y);
+            let angleRad = Math.atan2(y, x);
+            let angleDeg = angleRad * (180 / Math.PI);
+            if (angleDeg < 0) angleDeg += 360;
             
-            projectedTCs.push({
-                id: tc.id,
-                no: tcNo,
-                r: projectedR,
-                z: z,
-                temp: temp,
-                posName: posName,
-                angleDeg: angleDeg
-            });
+            let isMatch = false;
+            let projectedR = 0;
+            
+            if (r < 10) {
+                isMatch = true;
+                projectedR = 0;
+            } else {
+                const diff0 = Math.min(Math.abs(angleDeg - targetAngle0), 360 - Math.abs(angleDeg - targetAngle0));
+                const diff1 = Math.min(Math.abs(angleDeg - targetAngle1), 360 - Math.abs(angleDeg - targetAngle1));
+                
+                const tolerance = 10.0;
+                
+                if (diff0 <= tolerance) {
+                    isMatch = true;
+                    projectedR = r;
+                } else if (diff1 <= tolerance) {
+                    isMatch = true;
+                    projectedR = -r;
+                }
+            }
+            
+            if (isMatch) {
+                const normalizedId = parseInt(tc.id).toString();
+                const temp = dailyTemps[normalizedId];
+                const mesh = thermocoupleMeshes[normalizedId];
+                
+                projectedTCs.push({
+                    id: tc.id,
+                    no: mesh ? mesh.userData.no : "",
+                    r: projectedR,
+                    z: z,
+                    temp: temp,
+                    posName: mesh ? mesh.userData.position : "",
+                    angleDeg: angleDeg
+                });
+            }
         }
     }
 }
@@ -1279,8 +1338,11 @@ function updateScale() {
     const width = canvas2D.width;
     const height = canvas2D.height;
     
+    const localMinZ = (sliceOrientation2D === 'horizontal') ? -7600 : 3500;
+    const localMaxZ = (sliceOrientation2D === 'horizontal') ? 7600 : 14100;
+    
     const physicalWidth = maxR - minR;
-    const physicalHeight = maxZ - minZ;
+    const physicalHeight = localMaxZ - localMinZ;
     
     const margin = 60;
     const scaleX = (width - margin * 2) / physicalWidth;
@@ -1290,7 +1352,7 @@ function updateScale() {
     scale2D = baseScale * zoom2D;
     
     offsetX2D = (width - physicalWidth * scale2D) / 2 - minR * scale2D + panX2D;
-    offsetY2D = height - (height - physicalHeight * scale2D) / 2 + minZ * scale2D + panY2D;
+    offsetY2D = height - (height - physicalHeight * scale2D) / 2 + localMinZ * scale2D + panY2D;
 }
 
 function rToX(r) {
@@ -1310,6 +1372,11 @@ function yToZ(y) {
 }
 
 function isInsideRefractory(r, z) {
+    if (sliceOrientation2D === 'horizontal') {
+        const dist = Math.sqrt(r*r + z*z);
+        const maxDist = (sliceElevation2D < 7100) ? 7320 : 6600;
+        return dist <= maxDist;
+    }
     if (z < 3946 || z > 13900) return false;
     const absR = Math.abs(r);
     if (absR > 7320) return false;
@@ -1323,14 +1390,19 @@ function isInsideRefractory(r, z) {
 
 function clipToRefractory(ctx) {
     ctx.beginPath();
-    ctx.moveTo(rToX(-7320), zToY(13900));
-    ctx.lineTo(rToX(-7320), zToY(3946));
-    ctx.lineTo(rToX(7320), zToY(3946));
-    ctx.lineTo(rToX(7320), zToY(13900));
-    ctx.lineTo(rToX(6600), zToY(13900));
-    ctx.lineTo(rToX(6600), zToY(7100));
-    ctx.lineTo(rToX(-6600), zToY(7100));
-    ctx.lineTo(rToX(-6600), zToY(13900));
+    if (sliceOrientation2D === 'horizontal') {
+        const maxDist = (sliceElevation2D < 7100) ? 7320 : 6600;
+        ctx.arc(rToX(0), zToY(0), maxDist * scale2D, 0, Math.PI * 2);
+    } else {
+        ctx.moveTo(rToX(-7320), zToY(13900));
+        ctx.lineTo(rToX(-7320), zToY(3946));
+        ctx.lineTo(rToX(7320), zToY(3946));
+        ctx.lineTo(rToX(7320), zToY(13900));
+        ctx.lineTo(rToX(6600), zToY(13900));
+        ctx.lineTo(rToX(6600), zToY(7100));
+        ctx.lineTo(rToX(-6600), zToY(7100));
+        ctx.lineTo(rToX(-6600), zToY(13900));
+    }
     ctx.closePath();
     ctx.clip();
 }
@@ -1465,93 +1537,142 @@ function draw2DIsotherm() {
         ctx2D.save();
         clipToRefractory(ctx2D);
         
+        const localMinZ = (sliceOrientation2D === 'horizontal') ? -7600 : 3500;
+        const localMaxZ = (sliceOrientation2D === 'horizontal') ? 7600 : 14100;
+
         const x0 = rToX(minR);
-        const y0 = zToY(maxZ);
+        const y0 = zToY(localMaxZ);
         const w = rToX(maxR) - x0;
-        const h = zToY(minZ) - y0;
+        const h = zToY(localMinZ) - y0;
         
         ctx2D.imageSmoothingEnabled = true;
         ctx2D.drawImage(offscreenCanvas, x0, y0, w, h);
         ctx2D.restore();
     }
     
-    ctx2D.fillStyle = 'rgba(255, 240, 240, 0.85)';
-    ctx2D.beginPath();
-    ctx2D.moveTo(rToX(-6600), zToY(13900));
-    ctx2D.lineTo(rToX(-6600), zToY(7100));
-    ctx2D.lineTo(rToX(6600), zToY(7100));
-    ctx2D.lineTo(rToX(6600), zToY(13900));
-    ctx2D.closePath();
-    ctx2D.fill();
-    
-    ctx2D.strokeStyle = '#eebbbb';
-    ctx2D.lineWidth = 2;
-    ctx2D.stroke();
-    
-    ctx2D.fillStyle = '#b74040';
-    ctx2D.font = 'bold 20px sans-serif';
-    ctx2D.textAlign = 'center';
-    ctx2D.textBaseline = 'middle';
-    ctx2D.fillText("HEARTH CHAMBER (LIQUID METAL)", rToX(0), zToY(10500));
-    
-    if (showOriginalProfile) {
-        ctx2D.strokeStyle = '#cccccc';
-        ctx2D.lineWidth = 10;
+    if (sliceOrientation2D === 'horizontal') {
+        const maxDist = (sliceElevation2D < 7100) ? 7320 : 6600;
+        ctx2D.fillStyle = 'rgba(255, 240, 240, 0.85)';
         ctx2D.beginPath();
-        ctx2D.moveTo(rToX(-7400), zToY(13900));
-        ctx2D.lineTo(rToX(-7400), zToY(3946));
-        ctx2D.lineTo(rToX(7400), zToY(3946));
-        ctx2D.lineTo(rToX(7400), zToY(13900));
-        ctx2D.stroke();
-        
-        ctx2D.fillStyle = 'rgba(200, 210, 220, 0.4)';
-        ctx2D.beginPath();
-        ctx2D.rect(rToX(-7400), zToY(13900), 80 * scale2D, (13900 - 3946) * scale2D);
-        ctx2D.rect(rToX(7320), zToY(13900), 80 * scale2D, (13900 - 3946) * scale2D);
+        ctx2D.arc(rToX(0), zToY(0), maxDist * scale2D, 0, Math.PI * 2);
         ctx2D.fill();
-        ctx2D.strokeStyle = '#bbbbbb';
-        ctx2D.lineWidth = 1;
+        ctx2D.strokeStyle = '#eebbbb';
+        ctx2D.lineWidth = 2;
         ctx2D.stroke();
-        
-        ctx2D.fillStyle = 'rgba(255, 200, 100, 0.08)';
-        ctx2D.strokeStyle = '#ff9900';
-        ctx2D.lineWidth = 1.5;
-        ctx2D.setLineDash([4, 4]);
-        ctx2D.beginPath();
-        ctx2D.rect(rToX(-5800), zToY(7100), 11600 * scale2D, (7100 - 6177) * scale2D);
-        ctx2D.fill();
-        ctx2D.stroke();
-        ctx2D.setLineDash([]);
-        
-        ctx2D.fillStyle = '#cc6600';
-        ctx2D.font = 'bold 10px sans-serif';
-        ctx2D.fillText("MULLITE CERAMIC CUP", rToX(0), zToY(6637));
-        
-        ctx2D.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-        ctx2D.lineWidth = 1;
-        const dividerZ = [4160, 4727, 5177, 5677, 6177, 6637, 7100, 7550, 8450, 9350, 10400, 11600];
-        for (let z of dividerZ) {
+
+        ctx2D.fillStyle = '#b74040';
+        ctx2D.font = 'bold 20px sans-serif';
+        ctx2D.textAlign = 'center';
+        ctx2D.textBaseline = 'middle';
+        ctx2D.fillText("HORIZONTAL CROSS-SECTION", rToX(0), zToY(0) - 20);
+        ctx2D.font = 'bold 16px sans-serif';
+        ctx2D.fillText("EL +" + sliceElevation2D, rToX(0), zToY(0) + 10);
+
+        if (showOriginalProfile) {
+            ctx2D.strokeStyle = '#cccccc';
+            ctx2D.lineWidth = 10;
             ctx2D.beginPath();
-            ctx2D.moveTo(rToX(-7320), zToY(z));
-            ctx2D.lineTo(rToX(7320), zToY(z));
+            ctx2D.arc(rToX(0), zToY(0), 7400 * scale2D, 0, Math.PI * 2);
+            ctx2D.stroke();
+
+            ctx2D.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx2D.lineWidth = 1;
+            ctx2D.beginPath();
+            ctx2D.moveTo(rToX(-7500), zToY(0));
+            ctx2D.lineTo(rToX(7500), zToY(0));
+            ctx2D.moveTo(rToX(0), zToY(-7500));
+            ctx2D.lineTo(rToX(0), zToY(7500));
             ctx2D.stroke();
             
-            ctx2D.fillStyle = '#777777';
-            ctx2D.font = '9px monospace';
-            ctx2D.textAlign = 'left';
-            ctx2D.fillText(`EL. +${z}`, rToX(7450), zToY(z) + 3);
+            if (sliceElevation2D < 7100) {
+                ctx2D.strokeStyle = '#ff9900';
+                ctx2D.lineWidth = 1.5;
+                ctx2D.setLineDash([4, 4]);
+                ctx2D.beginPath();
+                ctx2D.arc(rToX(0), zToY(0), 5800 * scale2D, 0, Math.PI * 2);
+                ctx2D.stroke();
+                ctx2D.setLineDash([]);
+            }
         }
-        
-        ctx2D.strokeStyle = 'rgba(0, 0, 0, 0.15)';
-        ctx2D.setLineDash([10, 5, 2, 5]);
+    } else {
+        ctx2D.fillStyle = 'rgba(255, 240, 240, 0.85)';
         ctx2D.beginPath();
-        ctx2D.moveTo(rToX(0), zToY(3500));
-        ctx2D.lineTo(rToX(0), zToY(13900));
+        ctx2D.moveTo(rToX(-6600), zToY(13900));
+        ctx2D.lineTo(rToX(-6600), zToY(7100));
+        ctx2D.lineTo(rToX(6600), zToY(7100));
+        ctx2D.lineTo(rToX(6600), zToY(13900));
+        ctx2D.closePath();
+        ctx2D.fill();
+        
+        ctx2D.strokeStyle = '#eebbbb';
+        ctx2D.lineWidth = 2;
         ctx2D.stroke();
-        ctx2D.setLineDash([]);
-        ctx2D.fillStyle = '#555555';
-        ctx2D.fillText("C.L. BLAST FURNACE", rToX(0), zToY(14000));
+        
+        ctx2D.fillStyle = '#b74040';
+        ctx2D.font = 'bold 20px sans-serif';
         ctx2D.textAlign = 'center';
+        ctx2D.textBaseline = 'middle';
+        ctx2D.fillText("HEARTH CHAMBER (LIQUID METAL)", rToX(0), zToY(10500));
+        
+        if (showOriginalProfile) {
+            ctx2D.strokeStyle = '#cccccc';
+            ctx2D.lineWidth = 10;
+            ctx2D.beginPath();
+            ctx2D.moveTo(rToX(-7400), zToY(13900));
+            ctx2D.lineTo(rToX(-7400), zToY(3946));
+            ctx2D.lineTo(rToX(7400), zToY(3946));
+            ctx2D.lineTo(rToX(7400), zToY(13900));
+            ctx2D.stroke();
+            
+            ctx2D.fillStyle = 'rgba(200, 210, 220, 0.4)';
+            ctx2D.beginPath();
+            ctx2D.rect(rToX(-7400), zToY(13900), 80 * scale2D, (13900 - 3946) * scale2D);
+            ctx2D.rect(rToX(7320), zToY(13900), 80 * scale2D, (13900 - 3946) * scale2D);
+            ctx2D.fill();
+            ctx2D.strokeStyle = '#bbbbbb';
+            ctx2D.lineWidth = 1;
+            ctx2D.stroke();
+            
+            ctx2D.fillStyle = 'rgba(255, 200, 100, 0.08)';
+            ctx2D.strokeStyle = '#ff9900';
+            ctx2D.lineWidth = 1.5;
+            ctx2D.setLineDash([4, 4]);
+            ctx2D.beginPath();
+            ctx2D.rect(rToX(-5800), zToY(7100), 11600 * scale2D, (7100 - 6177) * scale2D);
+            ctx2D.fill();
+            ctx2D.stroke();
+            ctx2D.setLineDash([]);
+            
+            ctx2D.fillStyle = '#cc6600';
+            ctx2D.font = 'bold 10px sans-serif';
+            ctx2D.fillText("MULLITE CERAMIC CUP", rToX(0), zToY(6637));
+            
+            ctx2D.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+            ctx2D.lineWidth = 1;
+            const dividerZ = [4160, 4727, 5177, 5677, 6177, 6637, 7100, 7550, 8450, 9350, 10400, 11600];
+            for (let z of dividerZ) {
+                ctx2D.beginPath();
+                ctx2D.moveTo(rToX(-7320), zToY(z));
+                ctx2D.lineTo(rToX(7320), zToY(z));
+                ctx2D.stroke();
+                
+                ctx2D.fillStyle = '#777777';
+                ctx2D.font = '9px monospace';
+                ctx2D.textAlign = 'left';
+                ctx2D.fillText(`EL. +${z}`, rToX(7450), zToY(z) + 3);
+            }
+            
+            ctx2D.strokeStyle = 'rgba(0, 0, 0, 0.15)';
+            ctx2D.setLineDash([10, 5, 2, 5]);
+            ctx2D.beginPath();
+            ctx2D.moveTo(rToX(0), zToY(3500));
+            ctx2D.lineTo(rToX(0), zToY(13900));
+            ctx2D.stroke();
+            ctx2D.setLineDash([]);
+            ctx2D.fillStyle = '#555555';
+            ctx2D.fillText("C.L. BLAST FURNACE", rToX(0), zToY(14000));
+            ctx2D.textAlign = 'center';
+        }
     }
     
     drawSingleIsotherm(isothermThreshold, '#ff2222', 3);
@@ -1600,7 +1721,11 @@ function draw2DIsotherm() {
     ctx2D.fillStyle = '#000000';
     ctx2D.font = 'bold 16px sans-serif';
     ctx2D.textAlign = 'right';
-    ctx2D.fillText(`Cross Section: ${active2DSlice}° Slice`, canvas2D.width - 20, 40);
+    if (sliceOrientation2D === 'horizontal') {
+        ctx2D.fillText(`Horizontal Slice: EL +${sliceElevation2D}`, canvas2D.width - 20, 40);
+    } else {
+        ctx2D.fillText(`Vertical Slice: ${active2DSlice}°`, canvas2D.width - 20, 40);
+    }
     
     const slider = document.getElementById('dateSlider');
     if (slider) {
@@ -1624,12 +1749,82 @@ function handle2DResize() {
 function trigger2DRender() {
     if (is3DMode) return;
     
-    const planeSelect = document.getElementById('planeSelect');
-    const selectedSlice = planeSelect ? planeSelect.value : '35-215';
-    
-    projectThermocouples(selectedSlice);
+    initializeGrid();
+    projectThermocouples(active2DSlice);
     interpolateGrid();
     draw2DIsotherm();
+    drawMiniMap();
+}
+
+function drawMiniMap() {
+    const canvas = document.getElementById('miniMapCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    
+    const w = canvas.width;
+    const h = canvas.height;
+    const cx = w / 2;
+    const cy = h / 2;
+    const r = w / 2 - 20;
+    
+    ctx.clearRect(0, 0, w, h);
+    
+    // Draw furnace outline
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#333333';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    
+    // Draw degree labels
+    ctx.fillStyle = '#000000';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('0°', cx + r + 10, cy);
+    ctx.fillText('90°', cx, cy + r + 10);
+    ctx.fillText('180°', cx - r - 10, cy);
+    ctx.fillText('270°', cx, cy - r - 10);
+    
+    // Draw TC points
+    ctx.fillStyle = '#ff4444';
+    for (let tc of thermocouplePositions) {
+        const trueX = tc.pos.x;
+        const trueY = tc.pos.z;
+        const scale = r / 7600;
+        const mx = cx + trueX * scale;
+        const my = cy + trueY * scale;
+        
+        ctx.beginPath();
+        ctx.arc(mx, my, 1.5, 0, 2 * Math.PI);
+        ctx.fill();
+    }
+    
+    // Draw slice indicator
+    if (sliceOrientation2D === 'vertical') {
+        const parts = active2DSlice.split('-');
+        const angle0 = parseFloat(parts[0]);
+        const rad = angle0 * Math.PI / 180;
+        
+        ctx.beginPath();
+        ctx.moveTo(cx - r * Math.cos(rad), cy - r * Math.sin(rad));
+        ctx.lineTo(cx + r * Math.cos(rad), cy + r * Math.sin(rad));
+        ctx.strokeStyle = '#0078D4';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.arc(cx + r * Math.cos(rad), cy + r * Math.sin(rad), 4, 0, 2 * Math.PI);
+        ctx.fillStyle = '#0078D4';
+        ctx.fill();
+    } else {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(0, 120, 212, 0.3)';
+        ctx.fill();
+    }
 }
 
 function onCanvasMouseMove(event) {
@@ -1673,11 +1868,14 @@ function onCanvasMouseMove(event) {
         tooltip.style.top = event.clientY + 15 + 'px';
         
         const tempStr = foundNode.temp !== undefined ? `${Math.round(foundNode.temp)}°C` : 'N/A';
+        const locInfo = (sliceOrientation2D === 'horizontal') 
+            ? `Height: ${foundNode.trueZ} mm (closest to target)`
+            : `Radius: ${Math.round(Math.abs(foundNode.r))} mm (${foundNode.r >= 0 ? 'Right' : 'Left'})<br>Height: ${foundNode.z} mm`;
+
         tooltip.innerHTML = `
             <strong>TC ID: ${foundNode.id}</strong> (No. ${foundNode.no})<br>
             Position: ${foundNode.posName}<br>
-            Radius: ${Math.round(Math.abs(foundNode.r))} mm (${foundNode.r >= 0 ? '35° Side' : '215° Side'})<br>
-            Height: ${foundNode.z} mm<br>
+            ${locInfo}<br>
             Temperature: <span style="color: #ff5555; font-weight: bold;">${tempStr}</span>
         `;
         
@@ -1739,8 +1937,12 @@ function onCanvasWheel(event) {
     
     const width = canvas2D.width;
     const height = canvas2D.height;
+    
+    const localMinZ = (sliceOrientation2D === 'horizontal') ? -7600 : 3500;
+    const localMaxZ = (sliceOrientation2D === 'horizontal') ? 7600 : 14100;
+    
     const physicalWidth = maxR - minR;
-    const physicalHeight = maxZ - minZ;
+    const physicalHeight = localMaxZ - localMinZ;
     const margin = 60;
     const scaleX = (width - margin * 2) / physicalWidth;
     const scaleY = (height - margin * 2) / physicalHeight;
@@ -1748,7 +1950,7 @@ function onCanvasWheel(event) {
     
     const nextScale2D = baseScale * zoom2D;
     const nextOffsetX = (width - physicalWidth * nextScale2D) / 2 - minR * nextScale2D;
-    const nextOffsetY = height - (height - physicalHeight * nextScale2D) / 2 + minZ * nextScale2D;
+    const nextOffsetY = height - (height - physicalHeight * nextScale2D) / 2 + localMinZ * nextScale2D;
     
     panX2D = mouseX - (nextOffsetX + physR * nextScale2D);
     panY2D = mouseY - (nextOffsetY - physZ * nextScale2D);

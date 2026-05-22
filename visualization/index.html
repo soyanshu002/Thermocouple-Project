@@ -156,6 +156,9 @@
 
     <div id="container2D" style="display: none; position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #ffffff; z-index: 10;">
         <canvas id="canvas2D" style="width: 100%; height: 100%; display: block;"></canvas>
+        <div id="miniMapContainer" style="position: absolute; bottom: 20px; left: 20px; width: 200px; height: 200px; background: rgba(255, 255, 255, 0.9); border: 2px solid #333; border-radius: 50%; box-shadow: 0 4px 8px rgba(0,0,0,0.3); pointer-events: none; z-index: 20;">
+            <canvas id="miniMapCanvas" width="200" height="200" style="width: 100%; height: 100%; border-radius: 50%; display: block;"></canvas>
+        </div>
     </div>
 
     <div id="controls">
@@ -195,14 +198,20 @@
 
         <!-- 2D Controls -->
         <div id="controls2D" style="display: none; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; margin-top: 5px;">
-            <select id="planeSelect" style="padding: 8px; background: #555; color: #fff; border: 1px solid #777; border-radius: 4px; font-size: 14px; cursor: pointer;">
-                <option value="35-215">Slice Plane: 35° - 215° (Tuyeres 07-25)</option>
-                <option value="0-180">Slice Plane: 0° - 180°</option>
-                <option value="63-243">Slice Plane: 63° - 243°</option>
-                <option value="90-270">Slice Plane: 90° - 270°</option>
-                <option value="117-297">Slice Plane: 117° - 297°</option>
-                <option value="145-325">Slice Plane: 145° - 325°</option>
+            <select id="orientationSelect" style="padding: 8px; background: #0078D4; color: #fff; border: 1px solid #005A9E; border-radius: 4px; font-size: 14px; cursor: pointer; font-weight: bold;">
+                <option value="vertical">Vertical Slice</option>
+                <option value="horizontal">Horizontal Slice</option>
             </select>
+            <div id="angleControl" style="display: flex; align-items: center; gap: 6px;">
+                <label for="angleSlider2D" style="font-size: 14px; color: #ddd; font-weight: bold;">Slice Angle:</label>
+                <input type="range" id="angleSlider2D" min="0" max="179" value="35" step="1" style="width: 150px; cursor: pointer;">
+                <span id="angleLabel" style="font-size: 14px; color: #fff; min-width: 80px;">35° - 215°</span>
+            </div>
+            <div id="elevationControl" style="display: none; align-items: center; gap: 6px;">
+                <label for="elevationSlider2D" style="font-size: 14px; color: #ddd; font-weight: bold;">Elevation (Z):</label>
+                <input type="range" id="elevationSlider2D" min="3946" max="14500" value="7100" step="50" style="width: 150px; cursor: pointer;">
+                <span id="elevationLabel" style="font-size: 14px; color: #fff; min-width: 60px;">+7100</span>
+            </div>
             <div style="display: inline-flex; align-items: center; gap: 6px; margin-left: 5px;">
                 <label for="tempThresholdInput" style="font-size: 14px; color: #ff4444; font-weight: bold;">Isotherm:</label>
                 <input type="number" id="tempThresholdInput" value="1150" min="100" max="1500" step="50" style="width: 70px; padding: 6px; background: #444; color: #fff; border: 1px solid #666; border-radius: 4px; text-align: center; font-weight: bold;">
@@ -260,7 +269,7 @@
             </tbody>
         </table>
     </div>
-    <script type="module" src="./script.js?v=8"></script>
+    <script type="module" src="./script.js?v=9"></script>
 </body>
 
 </html>
